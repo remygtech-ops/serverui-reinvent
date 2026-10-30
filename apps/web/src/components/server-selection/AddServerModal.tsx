@@ -90,6 +90,7 @@ export function AddServerModal({
   const [auth, setAuth] = useState<AuthMethod>(server?.authType || "password");
   const [password, setPassword] = useState("");
   const [privateKey, setPrivateKey] = useState("");
+  const [saveCredentials, setSaveCredentials] = useState(server?.credentialsSaved !== false);
   const [iconId, setIconId] = useState(server?.iconId || DEFAULT_SERVER_ICON);
   /** null keeps a saved custom image. "" removes it. A data URL is a new upload. */
   const [iconImage, setIconImage] = useState<string | null>(null);
@@ -256,6 +257,7 @@ export function AddServerModal({
         authType: auth,
         password: password.trim() || undefined,
         privateKey: privateKey.trim() || undefined,
+        saveCredentials,
         iconId,
         ...(iconImage !== null ? { iconImage } : {}),
       },
@@ -448,6 +450,23 @@ export function AddServerModal({
               />
             </Field>
           )}
+
+          <label className="col-span-2 flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={saveCredentials}
+              onChange={(event) => setSaveCredentials(event.target.checked)}
+              className="mt-0.5 size-4 shrink-0"
+            />
+            <span className="min-w-0 text-[13px] leading-5">
+              Remember {auth === "private_key" ? "private key" : "password"}
+              <span className="sui-finder-muted block text-[12px]">
+                {saveCredentials
+                  ? "Stored encrypted on this machine, so you can reconnect after closing ServerUI."
+                  : "Not stored. ServerUI asks for it each time it starts and keeps it in memory only."}
+              </span>
+            </span>
+          </label>
         </div>
       </div>
 

@@ -26,6 +26,8 @@ export type Server = {
   authType?: "password" | "private_key";
   iconId?: string;
   customIcon?: boolean;
+  /** False when the password/key is not stored and is asked for at connect time. */
+  credentialsSaved?: boolean;
   updatedAt?: string;
   error?: string;
 };
@@ -47,6 +49,8 @@ export type NewServerInput = {
   authType: "password" | "private_key";
   password?: string;
   privateKey?: string;
+  /** Store the password/key encrypted. Defaults to true. */
+  saveCredentials?: boolean;
   iconId?: string;
   /** Data URL to store, or "" to remove a custom image. Omit to leave it unchanged. */
   iconImage?: string;

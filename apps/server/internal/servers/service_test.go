@@ -3,6 +3,7 @@ package servers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -207,5 +208,109 @@ func TestCreateRejectsMissingPassword(t *testing.T) {
 	})
 	if err == nil || err.Error() != "password is required" {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestSaveCredentialsOffKeepsSecretInMemoryOnly(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	off := false
+	created, err := svc.Create(ctx, Input{
+		Name: "Lab", Host: "203.0.113.20", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "hunter2", SaveCredentials: &off,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.CredentialsSaved {
+		t.Fatal("secret should not be stored")
+	}
+	cred, err := svc.store.GetCredential(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain, _ := svc.box.Decrypt(cred.EncryptedSecret); plain != "" {
+		t.Fatalf("stored secret %q", plain)
+	}
+	// Same running session: the secret entered at creation still works.
+	if _, _, err := svc.loadAuth(created.ID); err != nil {
+		t.Fatalf("session secret: %v", err)
+	}
+	// A fresh process (new service, same store) has no secret and must ask for one.
+	fresh := NewService(svc.store, svc.box)
+	if _, _, err := fresh.loadAuth(created.ID); !errors.Is(err, ErrSecretRequired) {
+		t.Fatalf("want ErrSecretRequired, got %v", err)
+	}
+	fresh.SetDialer(svc.dial)
+	if _, err := fresh.Test(ctx, created.ID); !errors.Is(err, ErrSecretRequired) {
+		t.Fatalf("test without secret: %v", err)
+	}
+}
+
+func TestSaveCredentialsDefaultStoresEncryptedSecret(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	created, err := svc.Create(ctx, Input{
+		Name: "Prod", Host: "203.0.113.21", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "hunter2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created.CredentialsSaved {
+		t.Fatal("secret should be stored by default")
+	}
+	fresh := NewService(svc.store, svc.box)
+	if _, _, err := fresh.loadAuth(created.ID); err != nil {
+		t.Fatalf("stored secret should survive a restart: %v", err)
+	}
+}
+
+func TestUpdateTogglesSecretStorage(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	created, err := svc.Create(ctx, Input{
+		Name: "Prod", Host: "203.0.113.22", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "hunter2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	off, on := false, true
+	in := Input{Name: "Prod", Host: "203.0.113.22", Port: 22, Username: "me", AuthType: AuthPassword}
+	in.SaveCredentials = &off
+	got, err := svc.Update(ctx, created.ID, in)
+	if err != nil || got.CredentialsSaved {
+		t.Fatalf("turn off: %v saved=%v", err, got.CredentialsSaved)
+	}
+	in.SaveCredentials = &on
+	if _, err := svc.Update(ctx, created.ID, in); err == nil {
+		t.Fatal("turning saving on needs a secret")
+	}
+	in.Password = "new-secret"
+	got, err = svc.Update(ctx, created.ID, in)
+	if err != nil || !got.CredentialsSaved {
+		t.Fatalf("turn on: %v saved=%v", err, got.CredentialsSaved)
+	}
+}
+
+func TestConnectWithSuppliedSecret(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	off := false
+	created, err := svc.Create(ctx, Input{
+		Name: "Lab", Host: "203.0.113.23", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "hunter2", SaveCredentials: &off,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := NewService(svc.store, svc.box)
+	fresh.SetDialer(svc.dial)
+	if _, err := fresh.Connect(ctx, created.ID, &Secret{}); err == nil {
+		t.Fatal("empty supplied secret must be rejected")
+	}
+	if _, err := fresh.Connect(ctx, created.ID, nil); !errors.Is(err, ErrSecretRequired) {
+		t.Fatalf("want ErrSecretRequired, got %v", err)
 	}
 }

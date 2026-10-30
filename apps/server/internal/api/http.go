@@ -118,6 +118,8 @@ type serverBody struct {
 	PrivateKey string  `json:"privateKey"`
 	IconID     string  `json:"iconId"`
 	IconImage  *string `json:"iconImage"`
+	// SaveCredentials is optional; omitted means the password/key is stored (encrypted).
+	SaveCredentials *bool `json:"saveCredentials"`
 }
 
 func (b serverBody) input() servers.Input {
@@ -131,6 +133,8 @@ func (b serverBody) input() servers.Input {
 		PrivateKey: b.PrivateKey,
 		IconID:     b.IconID,
 		IconImage:  b.IconImage,
+
+		SaveCredentials: b.SaveCredentials,
 	}
 }
 
@@ -236,8 +240,33 @@ func (s *Server) testServerDraft(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// connectBody optionally carries the password/key of a server saved without credentials.
+type connectBody struct {
+	Password   string `json:"password"`
+	PrivateKey string `json:"privateKey"`
+}
+
 func (s *Server) connectServer(w http.ResponseWriter, r *http.Request) {
-	item, err := s.servers.Connect(r.Context(), r.PathValue("id"))
+	var supplied *servers.Secret
+	if r.ContentLength != 0 {
+		var body connectBody
+		if err := decodeJSON(w, r, &body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+			return
+		}
+		if body.Password != "" || body.PrivateKey != "" {
+			supplied = &servers.Secret{Password: body.Password, PrivateKey: body.PrivateKey}
+		}
+	}
+	item, err := s.servers.Connect(r.Context(), r.PathValue("id"), supplied)
+	if errors.Is(err, servers.ErrSecretRequired) {
+		writeJSON(w, http.StatusPreconditionRequired, map[string]any{
+			"error":          "password required",
+			"secretRequired": true,
+			"server":         item,
+		})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{
 			"error":  sshx.PublicError(err),
