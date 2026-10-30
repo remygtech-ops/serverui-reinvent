@@ -1,0 +1,117 @@
+name: Windows Installer
+
+# Builds the Windows NSIS installer and publishes it as a GitHub Release.
+# The tag (v<version from tauri.conf.json>) is created by the release step itself,
+# so no manual `git tag` / `git push --tags` is needed.
+# Runs when this file changes on main, or manually from the Actions tab.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-installer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-installer
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows x64 installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: meta
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building ServerUI $VERSION"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            apps/web/package-lock.json
+            apps/desktop/package-lock.json
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: |
+          npm ci --prefix apps/web
+          npm ci --prefix apps/desktop
+
+      - name: Sync desktop version metadata
+        run: node apps/desktop/scripts/sync-version.mjs
+
+      - name: Build Go sidecar
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          TAURI_ENV_TARGET_TRIPLE: x86_64-pc-windows-msvc
+          FORCE_SIDECAR_REBUILD: "1"
+        run: |
+          chmod +x apps/desktop/scripts/prepare-sidecar.sh
+          apps/desktop/scripts/prepare-sidecar.sh
+          test -f apps/desktop/src-tauri/binaries/serverui-server-x86_64-pc-windows-msvc.exe
+
+      - name: Build Tauri app (NSIS installer)
+        working-directory: apps/desktop
+        run: npm run build:unsigned -- --bundles nsis
+
+      - name: Collect installer
+        run: |
+          set -euo pipefail
+          mkdir -p dist/publish
+          BUNDLE="apps/desktop/src-tauri/target/release/bundle"
+          [[ -d "$BUNDLE" ]] || BUNDLE="apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
+          SRC="$(ls "$BUNDLE"/nsis/*-setup.exe | head -n 1)"
+          DEST="dist/publish/ServerUI-${{ steps.meta.outputs.version }}-x64-setup.exe"
+          cp "$SRC" "$DEST"
+          (cd dist/publish && sha256sum "$(basename "$DEST")" > SHA256SUMS)
+          ls -la dist/publish
+          cat dist/publish/SHA256SUMS
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.meta.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: ServerUI ${{ steps.meta.outputs.version }}
+          draft: false
+          prerelease: false
+          body: |
+            ## ServerUI ${{ steps.meta.outputs.version }} (Windows)
+
+            Download `ServerUI-${{ steps.meta.outputs.version }}-x64-setup.exe` below and run it.
+            Verify with `SHA256SUMS` (`certutil -hashfile <file> SHA256`).
+
+            The installer is **not code-signed**: Windows SmartScreen may warn on first launch
+            ("More info" → "Run anyway").
+          files: dist/publish/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
