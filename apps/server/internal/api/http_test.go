@@ -259,6 +259,7 @@ func TestWebModeRejectsForeignOrigins(t *testing.T) {
 func TestWebModeOriginRules(t *testing.T) {
 	t.Setenv("SERVERUI_DESKTOP", "")
 	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "")
+	t.Setenv("SERVERUI_ALLOWED_HOSTS", "10.0.0.5,ui.example.test")
 	t.Setenv("SERVERUI_ALLOWED_ORIGINS", "https://panel.example.test")
 	mk := func(host, origin, xfh string) *http.Request {
 		r := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -274,19 +275,72 @@ func TestWebModeOriginRules(t *testing.T) {
 		req  *http.Request
 		want bool
 	}{
-		{"same host other port", mk("10.0.0.5:8080", "http://10.0.0.5:3000", ""), true},
-		{"ipv6 host", mk("[::1]:8080", "http://[::1]:3000", ""), true},
+		{"loopback, other port", mk("localhost:8080", "http://localhost:3000", ""), true},
+		{"allowed LAN address, other port", mk("10.0.0.5:8080", "http://10.0.0.5:3000", ""), true},
+		{"ipv6 loopback", mk("[::1]:8080", "http://[::1]:3000", ""), true},
 		{"through the Next proxy", mk("server:8080", "https://ui.example.test", "ui.example.test"), true},
 		{"listed origin", mk("server:8080", "https://panel.example.test", ""), true},
 		{"foreign origin", mk("localhost:8080", "https://evil.example", ""), false},
 		{"null origin", mk("localhost:8080", "null", ""), false},
 		{"forwarded host of another site", mk("server:8080", "https://evil.example", "ui.example.test"), false},
+		{"origin of an allowed name on a different host", mk("localhost:8080", "http://10.0.0.5:3000", ""), false},
 		{"no origin", httptest.NewRequest(http.MethodGet, "/healthz", nil), true},
 	}
 	for _, c := range cases {
 		if got := requestOriginAllowed(c.req); got != c.want {
 			t.Fatalf("%s: got %v want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestWebModeRefusesRebindingHosts(t *testing.T) {
+	t.Setenv("SERVERUI_DESKTOP", "")
+	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "")
+	t.Setenv("SERVERUI_ALLOWED_HOSTS", "")
+	t.Setenv("SERVERUI_ALLOWED_ORIGINS", "")
+	handler := (&Server{}).Handler()
+	do := func(method, host, origin, xfh string) int {
+		req := httptest.NewRequest(method, "/healthz", nil)
+		req.Host = host
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		if xfh != "" {
+			req.Header.Set("X-Forwarded-Host", xfh)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	// After a DNS rebinding the browser sends the attacker's name as Host and Origin, and a
+	// same-origin GET carries no Origin at all. None of them may reach the API.
+	if got := do(http.MethodGet, "rebind.evil.example:8080", "http://rebind.evil.example:8080", ""); got != http.StatusForbidden {
+		t.Fatalf("rebinding with Origin: status %d", got)
+	}
+	if got := do(http.MethodGet, "rebind.evil.example:8080", "", ""); got != http.StatusForbidden {
+		t.Fatalf("rebinding without Origin: status %d", got)
+	}
+	if got := do(http.MethodOptions, "rebind.evil.example:8080", "http://rebind.evil.example:8080", ""); got != http.StatusForbidden {
+		t.Fatalf("rebinding preflight: status %d", got)
+	}
+	// A rebound page is same-origin, so it can set X-Forwarded-Host itself; the proxy appends the
+	// real name, and any unknown name in the list refuses the request.
+	if got := do(http.MethodGet, "server:8080", "", "localhost, rebind.evil.example:3000"); got != http.StatusForbidden {
+		t.Fatalf("forged forwarded host: status %d", got)
+	}
+	// Legitimate names still work, including the Next proxy case.
+	for _, c := range []struct{ host, origin, xfh string }{
+		{"localhost:8080", "", ""},
+		{"127.0.0.1:8080", "", ""},
+		{"server:8080", "http://localhost:3000", "localhost:3000"},
+	} {
+		if got := do(http.MethodGet, c.host, c.origin, c.xfh); got != http.StatusOK {
+			t.Fatalf("%+v: status %d", c, got)
+		}
+	}
+	t.Setenv("SERVERUI_ALLOWED_HOSTS", "192.168.1.5")
+	if got := do(http.MethodGet, "192.168.1.5:8080", "http://192.168.1.5:3000", ""); got != http.StatusOK {
+		t.Fatalf("configured LAN host: status %d", got)
 	}
 }
 

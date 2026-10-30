@@ -32,6 +32,8 @@ services:
       HTTP_PORT: "8080"
       # Extra browser origins allowed to call the API (comma-separated). Same-host UIs need none.
       SERVERUI_ALLOWED_ORIGINS: ${SERVERUI_ALLOWED_ORIGINS:-}
+      # Host names the API answers to besides localhost (a LAN address or domain). Refuses DNS rebinding.
+      SERVERUI_ALLOWED_HOSTS: ${SERVERUI_ALLOWED_HOSTS:-}
       SERVERUI_CREDENTIAL_ENCRYPTION_KEY: ${SERVERUI_CREDENTIAL_ENCRYPTION_KEY:-}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432

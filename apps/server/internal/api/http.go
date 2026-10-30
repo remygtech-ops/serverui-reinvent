@@ -78,6 +78,11 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("/ws/terminal", s.term)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !DesktopMode() && !webHostAllowed(r) {
+			// DNS rebinding: the browser treats the attacker's name as this server. Host cannot be forged.
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "host not allowed"})
+			return
+		}
 		origin := r.Header.Get("Origin")
 		if origin != "" && !requestOriginAllowed(r) {
 			// Browsers always send Origin on cross-site requests and WebSocket upgrades.

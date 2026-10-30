@@ -240,6 +240,8 @@ func (s *Service) Update(ctx context.Context, id string, input Input) (Public, e
 			return Public{}, err
 		}
 		existing.HostKey = ""
+		// A Manager created while the old pin was still set would fail closed for the new host.
+		s.pool.Forget(existing.ID)
 	}
 	log.Printf("server.updated id=%s name=%s", existing.ID, existing.Name)
 	if reconnect {
@@ -400,6 +402,18 @@ func (s *Service) Test(ctx context.Context, id string) (TestResult, error) {
 	}, nil
 }
 
+// currentHostKey reads the pinned key fresh, so a pooled connection that reconnects later
+// enforces a pin recorded after it was created.
+func (s *Service) currentHostKey(id string) func() string {
+	return func() string {
+		rec, err := s.store.Get(context.Background(), id)
+		if err != nil {
+			return ""
+		}
+		return rec.HostKey
+	}
+}
+
 // pinHostKey returns the first-use callback that stores a server's host key fingerprint.
 func (s *Service) pinHostKey(id string) func(string) {
 	return func(fingerprint string) {
@@ -426,6 +440,7 @@ func (s *Service) loadAuth(id string) (sshx.Config, sshx.AuthMethod, error) {
 		Port:          rec.Port,
 		Username:      rec.Username,
 		PinnedHostKey: rec.HostKey,
+		PinLookup:     s.currentHostKey(rec.ID),
 		OnHostKey:     s.pinHostKey(rec.ID),
 	}
 	return cfg, auth, nil

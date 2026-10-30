@@ -155,13 +155,54 @@ func requestOriginAllowed(r *http.Request) bool {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
+	if !allowedHostNames()[host] {
+		return false
+	}
 	if strings.EqualFold(hostnameOf(r.Host), host) {
 		return true
 	}
-	if xfh := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Host"), ",")[0]); xfh != "" {
-		return strings.EqualFold(hostnameOf(xfh), host)
+	// Behind the Next proxy the request carries the browser's host in X-Forwarded-Host.
+	return strings.EqualFold(hostnameOf(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Host"), ",")[0])), host)
+}
+
+// defaultAllowedHosts are the names the web deployment answers to out of the box: this machine,
+// and "server", the compose service name the Next proxy uses.
+var defaultAllowedHosts = []string{"localhost", "127.0.0.1", "::1", "server"}
+
+// allowedHostNames is the set of Host names the API serves in web mode. A page on any other name
+// that resolves to this machine (DNS rebinding) is refused, whatever Origin it sends. Add the
+// names you really use with SERVERUI_ALLOWED_HOSTS (a LAN address, a domain behind a proxy).
+func allowedHostNames() map[string]bool {
+	set := map[string]bool{}
+	for _, h := range defaultAllowedHosts {
+		set[h] = true
 	}
-	return false
+	for _, h := range strings.Split(os.Getenv("SERVERUI_ALLOWED_HOSTS"), ",") {
+		if h = strings.ToLower(hostnameOf(strings.TrimSpace(h))); h != "" {
+			set[h] = true
+		}
+	}
+	for _, o := range strings.Split(os.Getenv("SERVERUI_ALLOWED_ORIGINS"), ",") {
+		if u, err := url.Parse(strings.TrimSpace(o)); err == nil && u.Hostname() != "" {
+			set[strings.ToLower(u.Hostname())] = true
+		}
+	}
+	return set
+}
+
+// webHostAllowed checks the Host header and every X-Forwarded-Host value. A browser cannot forge
+// Host, so after a DNS rebinding the attacker's own name is what shows up here.
+func webHostAllowed(r *http.Request) bool {
+	allowed := allowedHostNames()
+	if !allowed[strings.ToLower(hostnameOf(r.Host))] {
+		return false
+	}
+	for _, v := range strings.Split(r.Header.Get("X-Forwarded-Host"), ",") {
+		if v = strings.TrimSpace(v); v != "" && !allowed[strings.ToLower(hostnameOf(v))] {
+			return false
+		}
+	}
+	return true
 }
 
 func hostnameOf(hostport string) string {

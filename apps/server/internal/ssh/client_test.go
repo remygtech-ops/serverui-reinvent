@@ -270,3 +270,37 @@ func TestDialPinsTheHostKeyOnFirstUseAndRefusesAChange(t *testing.T) {
 		t.Fatalf("code %q for %v", code, err)
 	}
 }
+
+func TestManagerEnforcesAPinRecordedAfterItWasCreated(t *testing.T) {
+	addr := startTestSSHServer(t, "alice", "pw", nil)
+	host, port := splitAddr(t, addr)
+	var stored string // stands in for the servers table
+	cfg := Config{
+		Host: host, Port: port, Username: "alice",
+		PinLookup: func() string { return stored },
+		OnHostKey: func(fp string) {
+			if stored == "" {
+				stored = fp
+			}
+		},
+	}
+	mgr := NewManager(cfg, PasswordAuth{Password: "pw"})
+	client, err := mgr.Ensure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored == "" {
+		t.Fatal("first connection should pin the key")
+	}
+	// The connection drops, then the peer presents a different key than the pinned one.
+	pinned := stored
+	stored = "SHA256:aDifferentKeyThanTheOneTrustedAtFirstUse"
+	_ = client.Close()
+	for i := 0; i < 50 && func() bool { st, _ := mgr.Status(); return st == StatusOnline }(); i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := mgr.Ensure(); err == nil {
+		t.Fatal("a reconnect must enforce the pin that is stored now, not the one seen at creation")
+	}
+	_ = pinned
+}

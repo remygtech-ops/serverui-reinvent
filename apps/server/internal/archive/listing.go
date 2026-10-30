@@ -57,37 +57,46 @@ func (e *UnsafeError) Error() string {
 	return fmt.Sprintf("archive was not extracted: entry %q %s", name, e.Reason)
 }
 
-// ParseTarListing parses `tar -tv` output from GNU tar, BusyBox tar or bsdtar.
+// Tar listings are human-readable text whose owner and group columns come from the archive, so a
+// name such as "g 5" shifts every later column. The parser therefore anchors on the timestamp
+// instead of counting columns, and refuses any line where that anchor is not unique: owner and
+// group text can then never reach the name or the link target.
+const monthPattern = `(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)`
+
+var (
+	tarISOStamp   = regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?`)
+	tarMonthStamp = regexp.MustCompile(monthPattern + ` +\d{1,2} +(?:\d{2}:\d{2}|\d{4})`)
+	// GNU tar and BusyBox: mode owner/group size date time name
+	tarGNULine = regexp.MustCompile(`^(\S+)\s+(.+?)\s+(\d+|\d+,\s*\d+)\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?\s+(.+)$`)
+	// bsdtar: mode links owner group size month day time-or-year name
+	tarBSDLine = regexp.MustCompile(`^(\S+)\s+\d+\s+(.+?)\s+(\d+|\d+,\s*\d+)\s+` + monthPattern + ` +\d{1,2} +(?:\d{2}:\d{2}|\d{4})\s+(.+)$`)
+)
+
+// ParseTarListing parses `tar -tv` output from GNU tar, BusyBox tar or bsdtar. Any line that
+// does not fit exactly one known layout is refused, never guessed.
 func ParseTarListing(out string) ([]Entry, error) {
 	var entries []Entry
 	for _, line := range strings.Split(out, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		fields, rest := splitFields(line, 5)
-		if len(fields) < 5 || rest == "" {
-			return nil, errUnreadableEntry
-		}
-		sizeField := fields[2]
+		var m []string
 		switch {
-		case strings.Contains(fields[1], "/"):
-			// GNU tar and BusyBox print "owner/group" then the size (or "major,minor" for devices).
-			// Owner and group come from the archive, so a name with spaces shifts every column:
-			// refuse any line whose size column does not look like one.
-			if !tarSizeColumn.MatchString(sizeField) {
-				return nil, errUnreadableEntry
-			}
-		case digitsOnly(fields[1]):
-			// bsdtar: mode, links, owner, group, size, month, day, time-or-year.
-			fields, rest = splitFields(line, 8)
-			if len(fields) < 8 || rest == "" {
-				return nil, errUnreadableEntry
-			}
-			sizeField = fields[4]
-		default:
+		case len(tarISOStamp.FindAllStringIndex(line, -1)) == 1 && len(tarMonthStamp.FindAllStringIndex(line, -1)) == 0:
+			m = tarGNULine.FindStringSubmatch(line)
+		case len(tarISOStamp.FindAllStringIndex(line, -1)) == 0 && len(tarMonthStamp.FindAllStringIndex(line, -1)) == 1:
+			m = tarBSDLine.FindStringSubmatch(line)
+		}
+		if m == nil {
 			return nil, errUnreadableEntry
 		}
-		entry := Entry{Kind: kindFromMode(fields[0])}
+		mode, sizeField, rest := m[1], m[len(m)-2], m[len(m)-1]
+		for _, r := range rest {
+			if r < 0x20 || r == 0x7f {
+				return nil, errUnreadableEntry
+			}
+		}
+		entry := Entry{Kind: kindFromMode(mode)}
 		size, err := strconv.ParseInt(sizeField, 10, 64)
 		if err != nil {
 			// Device nodes print "major,minor" instead of a size.
@@ -97,34 +106,24 @@ func ParseTarListing(out string) ([]Entry, error) {
 		entry.Name = rest
 		switch entry.Kind {
 		case KindSymlink:
-			name, link, ok := strings.Cut(rest, " -> ")
-			if !ok {
-				// Without the separator the target is unknown, so it cannot be vetted.
+			// A name or target containing the separator makes the split ambiguous: refuse it.
+			if strings.Count(rest, " -> ") != 1 {
 				return nil, errUnreadableEntry
 			}
-			entry.Name, entry.Link = name, link
+			entry.Name, entry.Link, _ = strings.Cut(rest, " -> ")
 		case KindHardlink, KindFile:
-			if name, target, ok := strings.Cut(rest, " link to "); ok {
+			switch strings.Count(rest, " link to ") {
+			case 0:
+			case 1:
+				name, target, _ := strings.Cut(rest, " link to ")
 				entry.Name, entry.Link, entry.Kind = name, target, KindHardlink
+			default:
+				return nil, errUnreadableEntry
 			}
 		}
 		entries = append(entries, entry)
 	}
 	return entries, nil
-}
-
-var tarSizeColumn = regexp.MustCompile(`^(\d+|\d+,\s*\d+)$`)
-
-func digitsOnly(v string) bool {
-	if v == "" {
-		return false
-	}
-	for _, r := range v {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 var zipModePattern = regexp.MustCompile(`^[-dl?][-rwxsStTa?]{5,9}$`)

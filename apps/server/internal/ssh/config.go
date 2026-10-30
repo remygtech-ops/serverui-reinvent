@@ -16,7 +16,10 @@ type Config struct {
 	// PinnedHostKey is the SHA256 fingerprint trusted for this host. When set, any other host key
 	// is refused. When empty the first key seen is reported to OnHostKey (trust on first use).
 	PinnedHostKey string
-	OnHostKey     func(fingerprint string)
+	// PinLookup, when set, is read on every dial so a long-lived Manager always enforces the
+	// current pin, including one recorded after the Manager was created.
+	PinLookup func() string
+	OnHostKey func(fingerprint string)
 }
 
 // LoadConfig reads a single-host SSH target from process environment.

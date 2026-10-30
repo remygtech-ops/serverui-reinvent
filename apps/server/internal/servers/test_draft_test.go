@@ -219,3 +219,14 @@ func TestSavedCredentialIsNeverSentToAnotherDestination(t *testing.T) {
 		t.Fatalf("new host with a new secret: %v", err)
 	}
 }
+
+func TestDestinationComparisonIsASCIIOnlyCaseInsensitive(t *testing.T) {
+	saved := Record{Host: "kali.example", Port: 22, Username: "me"}
+	if !sameDestination(saved, Input{Host: "KALI.Example", Port: 22, Username: "me"}) {
+		t.Fatal("ASCII case differences are the same host")
+	}
+	// U+212A (Kelvin sign) folds to "k" under Unicode folding but is a different DNS label.
+	if sameDestination(saved, Input{Host: "\u212Aali.example", Port: 22, Username: "me"}) {
+		t.Fatal("a look-alike Unicode host must not count as the saved destination")
+	}
+}

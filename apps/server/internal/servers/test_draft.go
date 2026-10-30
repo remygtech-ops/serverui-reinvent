@@ -3,7 +3,6 @@ package servers
 import (
 	"context"
 	"log"
-	"strings"
 	"time"
 
 	sshx "serverui/server/internal/ssh"
@@ -89,5 +88,27 @@ func failedDraft(err error, latency int64) DraftTestResult {
 
 // sameDestination reports whether the request targets the host, port and user the secret was saved for.
 func sameDestination(saved Record, input Input) bool {
-	return strings.EqualFold(saved.Host, input.Host) && saved.Port == input.Port && saved.Username == input.Username
+	return asciiEqualFold(saved.Host, input.Host) && saved.Port == input.Port && saved.Username == input.Username
+}
+
+// asciiEqualFold compares host names the way DNS does: ASCII letters ignore case, everything else
+// must match exactly. strings.EqualFold also folds Unicode (the Kelvin sign equals "k"), which
+// would let a look-alike host count as the original destination.
+func asciiEqualFold(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		x, y := a[i], b[i]
+		if 'A' <= x && x <= 'Z' {
+			x += 'a' - 'A'
+		}
+		if 'A' <= y && y <= 'Z' {
+			y += 'a' - 'A'
+		}
+		if x != y {
+			return false
+		}
+	}
+	return true
 }
