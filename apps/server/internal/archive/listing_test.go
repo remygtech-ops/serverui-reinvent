@@ -261,3 +261,32 @@ func TestInspectRejectsSymlinkChains(t *testing.T) {
 		t.Fatalf("plain relative symlink must pass: %v", err)
 	}
 }
+
+func TestInspectRejectsHardLinksToSymlinks(t *testing.T) {
+	// a/b/s -> ../.. stays inside the folder where it sits, but a hard link to it at the top
+	// level is a symlink with the same target and resolves above the extraction folder.
+	_, err := Inspect([]Entry{
+		{Name: "a/", Kind: KindDir},
+		{Name: "a/b/", Kind: KindDir},
+		{Name: "a/b/s", Kind: KindSymlink, Link: "../.."},
+		{Name: "h", Kind: KindHardlink, Link: "a/b/s"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "hard link to a symbolic link") {
+		t.Fatalf("want a hard-link-to-symlink refusal, got %v", err)
+	}
+	// A hard link reached through a symlinked directory is refused too.
+	if _, err := Inspect([]Entry{
+		{Name: "d", Kind: KindSymlink, Link: "real"},
+		{Name: "real/f", Kind: KindFile},
+		{Name: "h", Kind: KindHardlink, Link: "d/f"},
+	}); err == nil {
+		t.Fatal("hard link through a symlink must be refused")
+	}
+	// An ordinary hard link to a regular file still works.
+	if _, err := Inspect([]Entry{
+		{Name: "a.txt", Kind: KindFile},
+		{Name: "b.txt", Kind: KindHardlink, Link: "a.txt"},
+	}); err != nil {
+		t.Fatalf("ordinary hard link must pass: %v", err)
+	}
+}

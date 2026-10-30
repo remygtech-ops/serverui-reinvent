@@ -253,8 +253,15 @@ func Inspect(entries []Entry) (Summary, error) {
 				return Summary{}, &UnsafeError{Name: entry.Name, Reason: "links outside the extraction folder"}
 			}
 		case KindHardlink:
-			if _, err := safeName(entry.Link); err != nil {
+			target, err := safeName(entry.Link)
+			if err != nil {
 				return Summary{}, &UnsafeError{Name: entry.Name, Reason: "links outside the extraction folder"}
+			}
+			// tar makes a hard link to a symlink another symlink with the same relative target. At a
+			// different depth that target can leave the folder, and the symlink checks above never
+			// see it, so a hard link to a symlink (or through one) is refused outright.
+			if symlinks[target] || throughSymlink(name, entry.Link, symlinks) {
+				return Summary{}, &UnsafeError{Name: entry.Name, Reason: "is a hard link to a symbolic link"}
 			}
 		}
 		names = append(names, name)
