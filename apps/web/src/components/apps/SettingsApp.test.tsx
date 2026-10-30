@@ -55,6 +55,21 @@ describe("SettingsApp", () => {
     localStorage.removeItem("serverui-terminal");
   });
 
+  it("switches the password vault to a Bitwarden instance in Security", async () => {
+    render(
+      <WallpaperProvider>
+        <SettingsApp />
+      </WallpaperProvider>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Security" }));
+    expect(screen.getByRole("radio", { name: "KeyKey (built in)" })).toBeChecked();
+    await userEvent.click(screen.getByRole("radio", { name: "Bitwarden instance" }));
+    expect(screen.getByLabelText("Bitwarden CLI address")).toHaveValue("http://localhost:8087");
+    await userEvent.click(screen.getByRole("radio", { name: "15 min" }));
+    expect(screen.getByRole("radio", { name: "15 min" })).toBeChecked();
+    localStorage.removeItem("serverui-security");
+  });
+
   it("swaps the built-in scenes for the light set", () => {
     document.documentElement.dataset.theme = "light";
     render(
