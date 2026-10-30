@@ -93,6 +93,20 @@ describe("TextEditor", () => {
     expect(screen.queryByLabelText("Unsaved changes")).not.toBeInTheDocument();
   });
 
+  it("colors a config file behind the text without changing what is edited", async () => {
+    readFileMock.mockResolvedValue({
+      path: "/etc/app.conf",
+      content: "# main\nport=80\n",
+      writable: true,
+    });
+    renderEditor();
+    const area = await screen.findByLabelText("Contents of app.conf");
+    expect(area).toHaveValue("# main\nport=80\n");
+    const layer = screen.getByTestId("syntax-layer");
+    expect(layer).toHaveTextContent("# main");
+    expect(layer.querySelector("span")).toHaveStyle({ color: "#7f8c98" });
+  });
+
   it("shows a clear error when saving fails", async () => {
     const { ApiError } = await import("@/src/lib/api/client");
     readFileMock.mockResolvedValue({ path: "/etc/app.conf", content: "a", writable: true });

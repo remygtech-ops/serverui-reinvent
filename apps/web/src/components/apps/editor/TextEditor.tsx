@@ -1,15 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ApiError } from "@/src/lib/api/client";
 import { readFile, writeFile } from "@/src/lib/api/files";
 import { looksLikeText } from "@/src/lib/files/file-type";
+import { HIGHLIGHT_LIMIT, languageForFile, tokenize, type TokenKind } from "@/src/lib/syntax";
 import { useSelectedServer } from "@/src/lib/session";
 import { setCloseGuard } from "@/src/components/window/window-context";
 import {
   ViewerMessage,
   darkViewerButtonClass,
 } from "@/src/components/apps/files/viewers/viewer-ui";
+
+const TOKEN_COLOR: Record<TokenKind, string> = {
+  comment: "#7f8c98",
+  string: "#a5d6a7",
+  number: "#f2a65a",
+  keyword: "#c792ea",
+  key: "#82aaff",
+};
 
 type Loaded = { text: string; crlf: boolean; writable: boolean };
 
@@ -43,6 +52,13 @@ export function TextEditor({
   const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [nonce, setNonce] = useState(0);
   const gutterRef = useRef<HTMLDivElement>(null);
+  const layerRef = useRef<HTMLDivElement>(null);
+  const language = languageForFile(fileName);
+  const highlighted = language !== "plain" && value.length <= HIGHLIGHT_LIMIT;
+  const tokens = useMemo(
+    () => (highlighted ? tokenize(value, language) : []),
+    [highlighted, language, value],
+  );
 
   const dirty = loaded !== null && value !== loaded.text;
   const dirtyRef = useRef(false);
@@ -201,25 +217,54 @@ export function TextEditor({
             <div key={i}>{i + 1}</div>
           ))}
         </div>
-        <textarea
-          aria-label={`Contents of ${fileName}`}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          wrap="off"
-          readOnly={!loaded.writable}
-          className="min-h-0 flex-1 resize-none bg-transparent py-3 pr-3 outline-none"
-          style={{ tabSize: 4 }}
-          value={value}
-          onChange={(event) => {
-            setValue(event.target.value);
-            setStatus(null);
-          }}
-          onKeyDown={onKeyDown}
-          onScroll={(event) => {
-            if (gutterRef.current) gutterRef.current.scrollTop = event.currentTarget.scrollTop;
-          }}
-        />
+        <div className="relative min-h-0 flex-1">
+          {highlighted ? (
+            <div
+              aria-hidden
+              data-testid="syntax-layer"
+              className="pointer-events-none absolute inset-0 overflow-hidden py-3 pr-3"
+            >
+              <div ref={layerRef} className="whitespace-pre" style={{ tabSize: 4 }}>
+                {tokens.map((token, index) =>
+                  token.kind ? (
+                    <span key={index} style={{ color: TOKEN_COLOR[token.kind] }}>
+                      {token.text}
+                    </span>
+                  ) : (
+                    token.text
+                  ),
+                )}
+                {"\n"}
+              </div>
+            </div>
+          ) : null}
+          <textarea
+            aria-label={`Contents of ${fileName}`}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            wrap="off"
+            readOnly={!loaded.writable}
+            className="absolute inset-0 size-full resize-none bg-transparent py-3 pr-3 outline-none"
+            style={{
+              tabSize: 4,
+              ...(highlighted ? { color: "transparent", caretColor: "#d7d7d7" } : {}),
+            }}
+            value={value}
+            onChange={(event) => {
+              setValue(event.target.value);
+              setStatus(null);
+            }}
+            onKeyDown={onKeyDown}
+            onScroll={(event) => {
+              const { scrollTop, scrollLeft } = event.currentTarget;
+              if (gutterRef.current) gutterRef.current.scrollTop = scrollTop;
+              if (layerRef.current) {
+                layerRef.current.style.transform = `translate(${-scrollLeft}px, ${-scrollTop}px)`;
+              }
+            }}
+          />
+        </div>
       </div>
     </div>
   );
