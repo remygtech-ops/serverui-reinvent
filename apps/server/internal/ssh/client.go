@@ -34,7 +34,7 @@ func Dial(cfg Config, auth AuthMethod) (*ssh.Client, error) {
 			if pinned == "" {
 				// First use: trust and report the key so the caller can pin it.
 				if cfg.OnHostKey != nil {
-					cfg.OnHostKey(fingerprint)
+					return cfg.OnHostKey(fingerprint)
 				}
 				return nil
 			}

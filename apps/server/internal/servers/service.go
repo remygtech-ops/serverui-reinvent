@@ -414,14 +414,20 @@ func (s *Service) currentHostKey(id string) func() string {
 	}
 }
 
-// pinHostKey returns the first-use callback that stores a server's host key fingerprint.
-func (s *Service) pinHostKey(id string) func(string) {
-	return func(fingerprint string) {
-		if err := s.store.SetHostKey(context.Background(), id, fingerprint); err != nil {
+// pinHostKey returns the first-use callback that stores a server's host key fingerprint. When
+// another connection pinned a different key first, this one is refused instead of accepted.
+func (s *Service) pinHostKey(id string) func(string) error {
+	return func(fingerprint string) error {
+		pinned, err := s.store.SetHostKey(context.Background(), id, fingerprint)
+		if err != nil {
 			log.Printf("server.hostkey id=%s pin failed", id)
-			return
+			return fmt.Errorf("unable to record the SSH host key")
+		}
+		if pinned != fingerprint {
+			return fmt.Errorf("host key mismatch: the server presented %s but %s was trusted", fingerprint, pinned)
 		}
 		log.Printf("server.hostkey id=%s pinned", id)
+		return nil
 	}
 }
 

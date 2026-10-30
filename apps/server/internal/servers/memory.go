@@ -86,18 +86,18 @@ func (s *MemoryStore) UpsertCredential(_ context.Context, cred Credential) error
 	return nil
 }
 
-func (s *MemoryStore) SetHostKey(_ context.Context, id, fingerprint string) error {
+func (s *MemoryStore) SetHostKey(_ context.Context, id, fingerprint string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, ok := s.items[id]
 	if !ok {
-		return ErrNotFound
+		return "", ErrNotFound
 	}
 	if rec.HostKey == "" {
 		rec.HostKey = fingerprint
 		s.items[id] = rec
 	}
-	return nil
+	return rec.HostKey, nil
 }
 
 func (s *MemoryStore) ClearHostKey(_ context.Context, id string) error {

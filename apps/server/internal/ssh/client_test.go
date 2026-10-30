@@ -243,7 +243,7 @@ func TestDialPinsTheHostKeyOnFirstUseAndRefusesAChange(t *testing.T) {
 	addr := startTestSSHServer(t, "alice", "pw", nil)
 	host, port := splitAddr(t, addr)
 	var pinned string
-	cfg := Config{Host: host, Port: port, Username: "alice", OnHostKey: func(fp string) { pinned = fp }}
+	cfg := Config{Host: host, Port: port, Username: "alice", OnHostKey: func(fp string) error { pinned = fp; return nil }}
 	client, err := Dial(cfg, PasswordAuth{Password: "pw"})
 	if err != nil {
 		t.Fatal(err)
@@ -278,10 +278,11 @@ func TestManagerEnforcesAPinRecordedAfterItWasCreated(t *testing.T) {
 	cfg := Config{
 		Host: host, Port: port, Username: "alice",
 		PinLookup: func() string { return stored },
-		OnHostKey: func(fp string) {
+		OnHostKey: func(fp string) error {
 			if stored == "" {
 				stored = fp
 			}
+			return nil
 		},
 	}
 	mgr := NewManager(cfg, PasswordAuth{Password: "pw"})

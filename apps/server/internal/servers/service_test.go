@@ -397,7 +397,9 @@ func TestHostKeyIsPinnedOnFirstConnectionAndResetWhenTheSecretIsEnteredAgain(t *
 			return fmt.Errorf("host key mismatch")
 		}
 		if cfg.PinnedHostKey == "" && cfg.OnHostKey != nil {
-			cfg.OnHostKey("SHA256:first")
+			if err := cfg.OnHostKey("SHA256:first"); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -438,5 +440,40 @@ func TestHostKeyIsPinnedOnFirstConnectionAndResetWhenTheSecretIsEnteredAgain(t *
 	}
 	if rec, _ = svc.store.Get(ctx, created.ID); rec.HostKey != "SHA256:first" || rec.Name != "Prod 2" {
 		t.Fatalf("rename changed the pin: %+v", rec)
+	}
+}
+
+func TestOnlyOneFirstUseKeyIsPinnedAndTheOtherConnectionIsRefused(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	svc.SetDialer(func(sshx.Config, sshx.AuthMethod) error { return nil })
+	created, err := svc.Create(ctx, Input{
+		Name: "Prod", Host: "203.0.113.50", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "pw",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.store.ClearHostKey(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	pin := svc.pinHostKey(created.ID)
+	// Two first connections that both saw an empty pin: the first to record wins and the second
+	// must be refused, not accepted with a key that is not the pinned one.
+	if err := pin("SHA256:winner"); err != nil {
+		t.Fatalf("first connection: %v", err)
+	}
+	err = pin("SHA256:loser")
+	if err == nil || !strings.Contains(err.Error(), "host key mismatch") {
+		t.Fatalf("the losing connection must be refused, got %v", err)
+	}
+	if code, _ := sshx.ClassifyError(err); code != sshx.CodeHostKeyChanged {
+		t.Fatalf("code %q", code)
+	}
+	if rec, _ := svc.store.Get(ctx, created.ID); rec.HostKey != "SHA256:winner" {
+		t.Fatalf("pin changed: %q", rec.HostKey)
+	}
+	if err := pin("SHA256:winner"); err != nil {
+		t.Fatalf("the pinned key stays accepted: %v", err)
 	}
 }

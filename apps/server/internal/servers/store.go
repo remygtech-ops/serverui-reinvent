@@ -24,7 +24,9 @@ type Store interface {
 	GetCredential(ctx context.Context, serverID string) (Credential, error)
 	UpsertCredential(ctx context.Context, cred Credential) error
 	// SetHostKey pins the host key fingerprint if none is pinned yet (trust on first use).
-	SetHostKey(ctx context.Context, id, fingerprint string) error
+	// It returns the fingerprint that is pinned afterwards, which differs from the argument when
+	// another connection pinned a key first.
+	SetHostKey(ctx context.Context, id, fingerprint string) (string, error)
 	// ClearHostKey forgets the pinned key; the next connection pins again.
 	ClearHostKey(ctx context.Context, id string) error
 }
@@ -189,10 +191,20 @@ func (s *SQLStore) UpsertCredential(ctx context.Context, cred Credential) error 
 	return err
 }
 
-// SetHostKey only writes when no key is pinned, so a concurrent first connection cannot replace one.
-func (s *SQLStore) SetHostKey(ctx context.Context, id, fingerprint string) error {
-	_, err := s.db.ExecContext(ctx, s.q(`UPDATE servers SET host_key=$2 WHERE id=$1 AND host_key=''`), id, fingerprint)
-	return err
+// SetHostKey only writes when no key is pinned, so a concurrent first connection cannot replace
+// one, and returns the key that is pinned afterwards so the loser of a race can be refused.
+func (s *SQLStore) SetHostKey(ctx context.Context, id, fingerprint string) (string, error) {
+	if _, err := s.db.ExecContext(ctx, s.q(`UPDATE servers SET host_key=$2 WHERE id=$1 AND host_key=''`), id, fingerprint); err != nil {
+		return "", err
+	}
+	var pinned string
+	if err := s.db.QueryRowContext(ctx, s.q(`SELECT host_key FROM servers WHERE id=$1`), id).Scan(&pinned); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	return pinned, nil
 }
 
 func (s *SQLStore) ClearHostKey(ctx context.Context, id string) error {
