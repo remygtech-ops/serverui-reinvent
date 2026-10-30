@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"serverui/server/internal/crypto"
@@ -21,6 +23,10 @@ type Service struct {
 	pool    *sshx.Pool
 	dial    Dialer
 	iconDir string
+
+	// sessionSecrets holds secrets of servers saved without credentials. Memory only.
+	secretMu       sync.Mutex
+	sessionSecrets map[string]string
 }
 
 type TestResult struct {
@@ -35,6 +41,8 @@ func NewService(store Store, box crypto.Cipher) *Service {
 		store: store,
 		box:   box,
 		dial:  liveDial,
+
+		sessionSecrets: map[string]string{},
 	}
 	s.pool = sshx.NewPool(s.loadAuth)
 	return s
@@ -93,7 +101,11 @@ func (s *Service) Create(ctx context.Context, input Input) (Public, error) {
 	if err != nil {
 		return Public{}, err
 	}
-	encrypted, err := s.box.Encrypt(secret)
+	stored := secret
+	if !input.saveCredentials() {
+		stored = ""
+	}
+	encrypted, err := s.box.Encrypt(stored)
 	if err != nil {
 		return Public{}, fmt.Errorf("unable to store credentials")
 	}
@@ -131,6 +143,9 @@ func (s *Service) Create(ctx context.Context, input Input) (Public, error) {
 	}
 	log.Printf("server.created id=%s name=%s host=%s", rec.ID, rec.Name, rec.Host)
 
+	if !input.saveCredentials() {
+		s.setSessionSecret(rec.ID, secret)
+	}
 	rec, _ = s.testAndUpdate(ctx, rec, secret)
 	return s.public(rec), nil
 }
@@ -159,12 +174,37 @@ func (s *Service) Update(ctx context.Context, id string, input Input) (Public, e
 		existing.Status = StatusUnknown
 	}
 
-	if requireSecret {
-		secret, err := s.secret(input, true)
-		if err != nil {
-			return Public{}, err
+	// Switching "save password" off drops the stored secret; switching it on needs a new one.
+	wasSaved := s.secretSaved(existing.ID)
+	if input.SaveCredentials != nil && *input.SaveCredentials && !wasSaved && !requireSecret {
+		return Public{}, fmt.Errorf("enter the password or private key to save it")
+	}
+	dropSecret := input.SaveCredentials != nil && !*input.SaveCredentials && wasSaved
+	if dropSecret && !requireSecret {
+		// Keep using the stored secret for this session, then forget it on disk.
+		if cred, err := s.store.GetCredential(ctx, existing.ID); err == nil {
+			if plain, err := s.box.Decrypt(cred.EncryptedSecret); err == nil {
+				s.setSessionSecret(existing.ID, plain)
+			}
 		}
-		encrypted, err := s.box.Encrypt(secret)
+	}
+	if requireSecret || dropSecret {
+		secret := ""
+		if requireSecret {
+			var err error
+			secret, err = s.secret(input, true)
+			if err != nil {
+				return Public{}, err
+			}
+		}
+		stored := secret
+		if !input.saveCredentials() {
+			stored = ""
+			if secret != "" {
+				s.setSessionSecret(existing.ID, secret)
+			}
+		}
+		encrypted, err := s.box.Encrypt(stored)
 		if err != nil {
 			return Public{}, fmt.Errorf("unable to store credentials")
 		}
@@ -235,6 +275,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	s.pool.Forget(id)
+	s.clearSessionSecret(id)
 	if err := s.store.Delete(ctx, id); err != nil {
 		return err
 	}
@@ -243,10 +284,19 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *Service) Connect(ctx context.Context, id string) (Public, error) {
+// Connect opens the pooled SSH session. supplied carries the password/key for servers saved
+// without credentials; it is validated, kept in memory only and never written to disk.
+func (s *Service) Connect(ctx context.Context, id string, supplied *Secret) (Public, error) {
 	rec, err := s.store.Get(ctx, id)
 	if err != nil {
 		return Public{}, err
+	}
+	if supplied != nil {
+		secret, err := s.suppliedSecret(rec.AuthType, *supplied)
+		if err != nil {
+			return s.public(rec), err
+		}
+		s.setSessionSecret(rec.ID, secret)
 	}
 	log.Printf("SSH connection requested server=%s", rec.Name)
 	rec.Status = StatusConnecting
@@ -256,6 +306,16 @@ func (s *Service) Connect(ctx context.Context, id string) (Public, error) {
 
 	_, err = s.pool.Ensure(id)
 	if err != nil {
+		if errors.Is(err, ErrSecretRequired) {
+			rec.Status = StatusOffline
+			rec.LastError = ""
+			rec.UpdatedAt = time.Now().UTC()
+			_ = s.store.Update(ctx, rec)
+			return s.public(rec), err
+		}
+		if supplied != nil {
+			s.clearSessionSecret(rec.ID)
+		}
 		rec.Status = statusFromErr(err)
 		rec.LastError = sshx.PublicError(err)
 		rec.UpdatedAt = time.Now().UTC()
@@ -359,7 +419,65 @@ func (s *Service) savedAuth(ctx context.Context, rec Record) (sshx.AuthMethod, e
 	if err != nil {
 		return nil, fmt.Errorf("unable to authenticate")
 	}
+	if secret == "" {
+		// Saved without credentials: only a secret entered this session can be used.
+		session, ok := s.sessionSecret(rec.ID)
+		if !ok {
+			return nil, ErrSecretRequired
+		}
+		secret = session
+	}
 	return authMethod(rec.AuthType, secret)
+}
+
+// secretSaved reports whether a password/key is stored (encrypted) for the server.
+func (s *Service) secretSaved(id string) bool {
+	cred, err := s.store.GetCredential(context.Background(), id)
+	if err != nil {
+		return false
+	}
+	secret, err := s.box.Decrypt(cred.EncryptedSecret)
+	return err == nil && secret != ""
+}
+
+func (s *Service) suppliedSecret(authType string, supplied Secret) (string, error) {
+	switch authType {
+	case AuthPassword:
+		if strings.TrimSpace(supplied.Password) == "" {
+			return "", fmt.Errorf("password is required")
+		}
+		return strings.TrimSpace(supplied.Password), nil
+	case AuthPrivateKey:
+		key := strings.TrimSpace(supplied.PrivateKey)
+		if key == "" {
+			return "", fmt.Errorf("private key is required")
+		}
+		if _, err := sshx.ParsePrivateKeyAuth(key, ""); err != nil {
+			return "", err
+		}
+		return key, nil
+	default:
+		return "", fmt.Errorf("invalid authentication type")
+	}
+}
+
+func (s *Service) setSessionSecret(id, secret string) {
+	s.secretMu.Lock()
+	defer s.secretMu.Unlock()
+	s.sessionSecrets[id] = secret
+}
+
+func (s *Service) sessionSecret(id string) (string, bool) {
+	s.secretMu.Lock()
+	defer s.secretMu.Unlock()
+	secret, ok := s.sessionSecrets[id]
+	return secret, ok && secret != ""
+}
+
+func (s *Service) clearSessionSecret(id string) {
+	s.secretMu.Lock()
+	defer s.secretMu.Unlock()
+	delete(s.sessionSecrets, id)
 }
 
 func (s *Service) secret(input Input, required bool) (string, error) {
@@ -423,6 +541,7 @@ func (s *Service) public(rec Record) Public {
 	out := rec.Public()
 	// Connected means a live pooled SSH session, not a previous successful test.
 	out.Connected = live
+	out.CredentialsSaved = s.secretSaved(rec.ID)
 	return out
 }
 
