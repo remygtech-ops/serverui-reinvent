@@ -48,15 +48,38 @@ func LooksLikeText(sample []byte) bool {
 	return nonPrintable*100/len(sample) < 8
 }
 
+// activeTypes can run script or load resources when a browser renders them, so they are never
+// shown inline from the API origin. SVG still works in an <img>, which ignores the disposition.
+var activeTypes = map[string]bool{
+	"text/html":              true,
+	"application/xhtml+xml":  true,
+	"text/xml":               true,
+	"application/xml":        true,
+	"image/svg+xml":          true,
+	"text/javascript":        true,
+	"application/javascript": true,
+	"text/css":               true,
+}
+
 func Inline(mime string) bool {
+	if activeTypes[mime] {
+		return false
+	}
+	return PassiveMedia(mime) ||
+		strings.HasPrefix(mime, "text/") ||
+		mime == "application/json"
+}
+
+// PassiveMedia is content a browser renders without executing script (images other than SVG,
+// audio, video and PDF).
+func PassiveMedia(mime string) bool {
+	if activeTypes[mime] {
+		return false
+	}
 	return strings.HasPrefix(mime, "image/") ||
 		strings.HasPrefix(mime, "video/") ||
 		strings.HasPrefix(mime, "audio/") ||
-		strings.HasPrefix(mime, "text/") ||
-		mime == "application/pdf" ||
-		mime == "application/json" ||
-		mime == "application/xml" ||
-		mime == "image/svg+xml"
+		mime == "application/pdf"
 }
 
 var mimeByExt = map[string]string{

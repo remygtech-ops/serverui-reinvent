@@ -185,3 +185,108 @@ func TestUnsafeErrorTruncatesLongNames(t *testing.T) {
 		t.Fatalf("message too long: %d", len(err.Error()))
 	}
 }
+
+func TestParseTarListingOwnerAndGroupCannotShiftColumns(t *testing.T) {
+	// Owner and group come from the archive. Spaces, digits and slashes in them must not change
+	// where the name and the link target are read from.
+	for _, owner := range []string{"a b c/g", "root/g 5", "root/a 1 2", "john doe/staff", `DOMAIN\user/Domain Users`, "x/y z/g"} {
+		out := "lrwxrwxrwx " + owner + " 0 2024-01-01 00:00 sub/up -> ..\n" +
+			"lrwxrwxrwx " + owner + " 0 2024-01-01 00:00 x -> sub/up/../..\n"
+		entries, err := ParseTarListing(out)
+		if err != nil {
+			t.Fatalf("owner %q: %v", owner, err)
+		}
+		if len(entries) != 2 || entries[0].Name != "sub/up" || entries[0].Link != ".." ||
+			entries[1].Name != "x" || entries[1].Link != "sub/up/../.." {
+			t.Fatalf("owner %q was mis-parsed: %+v", owner, entries)
+		}
+		// The shifted layouts used to hide the first link from Inspect; now the chain is caught.
+		if _, err := Inspect(entries); err == nil {
+			t.Fatalf("owner %q: the symlink chain must be rejected", owner)
+		}
+	}
+	// A symlink to an absolute path is rejected whatever the owner text is.
+	entries, err := ParseTarListing("lrwxrwxrwx a b c/g 0 2024-01-01 00:00 n -> /etc\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Inspect(entries); err == nil {
+		t.Fatal("absolute symlink must be rejected")
+	}
+}
+
+func TestParseTarListingRefusesAmbiguousLines(t *testing.T) {
+	for name, line := range map[string]string{
+		"timestamp inside the owner": "lrwxrwxrwx root/g 5 2020-01-01 00:00 evil 0 2024-01-01 00:00 sub/up -> ..",
+		"arrow inside the name":      "lrwxrwxrwx root/root 0 2024-01-01 00:00 d -> x -> /abs",
+		"two link separators":        "hrw-r--r-- root/root 0 2024-01-01 00:00 a link to b link to /abs",
+		"symlink without a target":   "lrwxrwxrwx root/root 0 2024-01-01 00:00 lonely",
+		"no timestamp":               "lrwxrwxrwx root/root 0 sub/up -> ..",
+		"control character in name":  "-rw-r--r-- root/root 3 2024-01-01 00:00 a\x01b",
+		"two layouts at once":        "-rw-r--r-- 1 root root 3 Jan  1 12:00 2024-01-01 00:00 a",
+	} {
+		if _, err := ParseTarListing(line + "\n"); err == nil {
+			t.Fatalf("%s: the line must be refused", name)
+		}
+	}
+}
+
+func TestParseTarListingStillReadsOrdinaryArchives(t *testing.T) {
+	out := "drwxr-xr-x user/group 0 2024-01-01 00:00 src/\n" +
+		"-rw-r--r-- 1000/1000 1234 2024-01-01 00:00:09 src/main.go\n" +
+		"lrwxrwxrwx root/root 0 2024-01-01 00:00 src/link -> main.go\n" +
+		"-rw-r--r-- 1 me staff 12 Jan  1 12:00 bsd.txt\n" +
+		"crw-rw-rw- root/root 1,3 2024-01-01 00:00 dev/null\n"
+	entries, err := ParseTarListing(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 5 || entries[1].Size != 1234 || entries[2].Link != "main.go" || entries[4].Kind != KindOther {
+		t.Fatalf("%+v", entries)
+	}
+}
+
+func TestInspectRejectsSymlinkChains(t *testing.T) {
+	_, err := Inspect([]Entry{
+		{Name: "sub/up", Kind: KindSymlink, Link: ".."},
+		{Name: "x", Kind: KindSymlink, Link: "sub/up/../.."},
+	})
+	if err == nil {
+		t.Fatal("a symlink that resolves through another symlink must be rejected")
+	}
+	if _, err := Inspect([]Entry{
+		{Name: "lib/a", Kind: KindFile},
+		{Name: "lib/b", Kind: KindSymlink, Link: "a"},
+	}); err != nil {
+		t.Fatalf("plain relative symlink must pass: %v", err)
+	}
+}
+
+func TestInspectRejectsHardLinksToSymlinks(t *testing.T) {
+	// a/b/s -> ../.. stays inside the folder where it sits, but a hard link to it at the top
+	// level is a symlink with the same target and resolves above the extraction folder.
+	_, err := Inspect([]Entry{
+		{Name: "a/", Kind: KindDir},
+		{Name: "a/b/", Kind: KindDir},
+		{Name: "a/b/s", Kind: KindSymlink, Link: "../.."},
+		{Name: "h", Kind: KindHardlink, Link: "a/b/s"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "hard link to a symbolic link") {
+		t.Fatalf("want a hard-link-to-symlink refusal, got %v", err)
+	}
+	// A hard link reached through a symlinked directory is refused too.
+	if _, err := Inspect([]Entry{
+		{Name: "d", Kind: KindSymlink, Link: "real"},
+		{Name: "real/f", Kind: KindFile},
+		{Name: "h", Kind: KindHardlink, Link: "d/f"},
+	}); err == nil {
+		t.Fatal("hard link through a symlink must be refused")
+	}
+	// An ordinary hard link to a regular file still works.
+	if _, err := Inspect([]Entry{
+		{Name: "a.txt", Kind: KindFile},
+		{Name: "b.txt", Kind: KindHardlink, Link: "a.txt"},
+	}); err != nil {
+		t.Fatalf("ordinary hard link must pass: %v", err)
+	}
+}

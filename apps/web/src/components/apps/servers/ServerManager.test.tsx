@@ -147,3 +147,32 @@ describe("ServerManager", () => {
     expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
   });
 });
+
+describe("ServerManager groups", () => {
+  it("groups servers under headings and filters by group", async () => {
+    const user = userEvent.setup();
+    render(
+      <ServerManager
+        actions={{
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+          reconnect: vi.fn(),
+          openFiles: vi.fn(),
+          openTerminal: vi.fn(),
+          openMetrics: vi.fn(),
+        }}
+      />,
+    );
+    await user.click(screen.getByRole("option", { name: /Homelab/ }));
+    const field = screen.getByLabelText("Group");
+    await user.type(field, "Home");
+    await user.tab();
+    expect(await screen.findByText("Home", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByText("Ungrouped")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Filter by group"), "Home");
+    expect(screen.queryByRole("option", { name: /Production/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Homelab/ })).toBeInTheDocument();
+    localStorage.removeItem("serverui-server-groups");
+  });
+});

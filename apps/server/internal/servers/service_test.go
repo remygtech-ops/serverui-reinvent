@@ -2,10 +2,16 @@ package servers
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 
 	"serverui/server/internal/crypto"
 	sshx "serverui/server/internal/ssh"
@@ -127,9 +133,16 @@ func TestIconUpdateDoesNotReconnect(t *testing.T) {
 	if dials != 0 || updated.Status != StatusOnline || updated.IconID != "cloud" {
 		t.Fatalf("dials %d status %s icon %s", dials, updated.Status, updated.IconID)
 	}
-	_, err = svc.Update(ctx, created.ID, Input{
+	// Moving to another host needs the secret again: the saved one is never reused for it.
+	if _, err = svc.Update(ctx, created.ID, Input{
 		Name: "Lab", Host: "203.0.113.11", Port: 22, Username: "deploy",
 		AuthType: AuthPassword, IconID: "cloud",
+	}); err == nil {
+		t.Fatal("host change without a new secret must be refused")
+	}
+	_, err = svc.Update(ctx, created.ID, Input{
+		Name: "Lab", Host: "203.0.113.11", Port: 22, Username: "deploy",
+		AuthType: AuthPassword, Password: "pw-for-new-host", IconID: "cloud",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -207,5 +220,260 @@ func TestCreateRejectsMissingPassword(t *testing.T) {
 	})
 	if err == nil || err.Error() != "password is required" {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestSaveCredentialsOffKeepsSecretInMemoryOnly(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	off := false
+	created, err := svc.Create(ctx, Input{
+		Name: "Lab", Host: "203.0.113.20", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "hunter2", SaveCredentials: &off,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.CredentialsSaved {
+		t.Fatal("secret should not be stored")
+	}
+	cred, err := svc.store.GetCredential(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain, _ := svc.box.Decrypt(cred.EncryptedSecret); plain != "" {
+		t.Fatalf("stored secret %q", plain)
+	}
+	// Same running session: the secret entered at creation still works.
+	if _, _, err := svc.loadAuth(created.ID); err != nil {
+		t.Fatalf("session secret: %v", err)
+	}
+	// A fresh process (new service, same store) has no secret and must ask for one.
+	fresh := NewService(svc.store, svc.box)
+	if _, _, err := fresh.loadAuth(created.ID); !errors.Is(err, ErrSecretRequired) {
+		t.Fatalf("want ErrSecretRequired, got %v", err)
+	}
+	fresh.SetDialer(svc.dial)
+	if _, err := fresh.Test(ctx, created.ID); !errors.Is(err, ErrSecretRequired) {
+		t.Fatalf("test without secret: %v", err)
+	}
+}
+
+func TestSaveCredentialsDefaultStoresEncryptedSecret(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	created, err := svc.Create(ctx, Input{
+		Name: "Prod", Host: "203.0.113.21", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "hunter2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created.CredentialsSaved {
+		t.Fatal("secret should be stored by default")
+	}
+	fresh := NewService(svc.store, svc.box)
+	if _, _, err := fresh.loadAuth(created.ID); err != nil {
+		t.Fatalf("stored secret should survive a restart: %v", err)
+	}
+}
+
+func TestUpdateTogglesSecretStorage(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	created, err := svc.Create(ctx, Input{
+		Name: "Prod", Host: "203.0.113.22", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "hunter2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	off, on := false, true
+	in := Input{Name: "Prod", Host: "203.0.113.22", Port: 22, Username: "me", AuthType: AuthPassword}
+	in.SaveCredentials = &off
+	got, err := svc.Update(ctx, created.ID, in)
+	if err != nil || got.CredentialsSaved {
+		t.Fatalf("turn off: %v saved=%v", err, got.CredentialsSaved)
+	}
+	in.SaveCredentials = &on
+	if _, err := svc.Update(ctx, created.ID, in); err == nil {
+		t.Fatal("turning saving on needs a secret")
+	}
+	in.Password = "new-secret"
+	got, err = svc.Update(ctx, created.ID, in)
+	if err != nil || !got.CredentialsSaved {
+		t.Fatalf("turn on: %v saved=%v", err, got.CredentialsSaved)
+	}
+}
+
+func TestConnectWithSuppliedSecret(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	off := false
+	created, err := svc.Create(ctx, Input{
+		Name: "Lab", Host: "203.0.113.23", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "hunter2", SaveCredentials: &off,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := NewService(svc.store, svc.box)
+	fresh.SetDialer(svc.dial)
+	if _, err := fresh.Connect(ctx, created.ID, &Secret{}); err == nil {
+		t.Fatal("empty supplied secret must be rejected")
+	}
+	if _, err := fresh.Connect(ctx, created.ID, nil); !errors.Is(err, ErrSecretRequired) {
+		t.Fatalf("want ErrSecretRequired, got %v", err)
+	}
+}
+
+func encryptedKey(t *testing.T, passphrase string) string {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "test", []byte(passphrase))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(block))
+}
+
+func TestPassphraseProtectedKeyIsStoredAndUsed(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	key := encryptedKey(t, "correct horse")
+	base := Input{
+		Name: "Key box", Host: "203.0.113.30", Port: 22, Username: "me",
+		AuthType: AuthPrivateKey, PrivateKey: key,
+	}
+
+	if _, err := svc.Create(ctx, base); err == nil || !strings.Contains(err.Error(), "passphrase") {
+		t.Fatalf("missing passphrase should be reported, got %v", err)
+	}
+	wrong := base
+	wrong.Passphrase = "wrong"
+	if _, err := svc.Create(ctx, wrong); err == nil || !strings.Contains(err.Error(), "passphrase") {
+		t.Fatalf("wrong passphrase should be reported, got %v", err)
+	}
+
+	good := base
+	good.Passphrase = "correct horse"
+	created, err := svc.Create(ctx, good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A fresh service reads the stored secret back, passphrase included.
+	fresh := NewService(svc.store, svc.box)
+	if _, _, err := fresh.loadAuth(created.ID); err != nil {
+		t.Fatalf("stored key and passphrase should load: %v", err)
+	}
+	cred, _ := svc.store.GetCredential(ctx, created.ID)
+	if plain, _ := svc.box.Decrypt(cred.EncryptedSecret); strings.Contains(string(plain), "correct horse") == false {
+		t.Fatal("passphrase should be part of the encrypted secret")
+	}
+}
+
+func TestPlainKeysKeepTheirOldStoredForm(t *testing.T) {
+	if packKey("-----BEGIN KEY-----", "") != "-----BEGIN KEY-----" {
+		t.Fatal("keys without a passphrase must stay plain")
+	}
+	key, pass := unpackKey("-----BEGIN KEY-----")
+	if key != "-----BEGIN KEY-----" || pass != "" {
+		t.Fatalf("unpack plain: %q %q", key, pass)
+	}
+	key, pass = unpackKey(packKey("KEYDATA", "pw"))
+	if key != "KEYDATA" || pass != "pw" {
+		t.Fatalf("unpack packed: %q %q", key, pass)
+	}
+}
+
+func TestHostKeyIsPinnedOnFirstConnectionAndResetWhenTheSecretIsEnteredAgain(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	svc.SetDialer(func(cfg sshx.Config, auth sshx.AuthMethod) error {
+		if cfg.PinnedHostKey != "" && cfg.PinnedHostKey != "SHA256:first" {
+			return fmt.Errorf("host key mismatch")
+		}
+		if cfg.PinnedHostKey == "" && cfg.OnHostKey != nil {
+			if err := cfg.OnHostKey("SHA256:first"); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	created, err := svc.Create(ctx, Input{
+		Name: "Prod", Host: "203.0.113.40", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "pw",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := svc.store.Get(ctx, created.ID)
+	if rec.HostKey != "SHA256:first" {
+		t.Fatalf("host key not pinned on first connection: %q", rec.HostKey)
+	}
+	// Ordinary status updates must not wipe the pin.
+	rec.Status = StatusOffline
+	if err := svc.store.Update(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ = svc.store.Get(ctx, created.ID); rec.HostKey != "SHA256:first" {
+		t.Fatalf("a status update dropped the pin: %q", rec.HostKey)
+	}
+	// Entering the secret again is how the operator accepts a new key: the pin is cleared and
+	// the next connection pins whatever the server presents.
+	if _, err := svc.Update(ctx, created.ID, Input{
+		Name: "Prod", Host: "203.0.113.40", Port: 22, Username: "me", AuthType: AuthPassword, Password: "pw2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ = svc.store.Get(ctx, created.ID); rec.HostKey != "SHA256:first" {
+		t.Fatalf("expected the reconnect to pin again, got %q", rec.HostKey)
+	}
+	// Renaming alone keeps the pin untouched.
+	if _, err := svc.Update(ctx, created.ID, Input{
+		Name: "Prod 2", Host: "203.0.113.40", Port: 22, Username: "me", AuthType: AuthPassword,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ = svc.store.Get(ctx, created.ID); rec.HostKey != "SHA256:first" || rec.Name != "Prod 2" {
+		t.Fatalf("rename changed the pin: %+v", rec)
+	}
+}
+
+func TestOnlyOneFirstUseKeyIsPinnedAndTheOtherConnectionIsRefused(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	svc.SetDialer(func(sshx.Config, sshx.AuthMethod) error { return nil })
+	created, err := svc.Create(ctx, Input{
+		Name: "Prod", Host: "203.0.113.50", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "pw",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.store.ClearHostKey(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	pin := svc.pinHostKey(created.ID)
+	// Two first connections that both saw an empty pin: the first to record wins and the second
+	// must be refused, not accepted with a key that is not the pinned one.
+	if err := pin("SHA256:winner"); err != nil {
+		t.Fatalf("first connection: %v", err)
+	}
+	err = pin("SHA256:loser")
+	if err == nil || !strings.Contains(err.Error(), "host key mismatch") {
+		t.Fatalf("the losing connection must be refused, got %v", err)
+	}
+	if code, _ := sshx.ClassifyError(err); code != sshx.CodeHostKeyChanged {
+		t.Fatalf("code %q", code)
+	}
+	if rec, _ := svc.store.Get(ctx, created.ID); rec.HostKey != "SHA256:winner" {
+		t.Fatalf("pin changed: %q", rec.HostKey)
+	}
+	if err := pin("SHA256:winner"); err != nil {
+		t.Fatalf("the pinned key stays accepted: %v", err)
 	}
 }

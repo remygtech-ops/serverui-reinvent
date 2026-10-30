@@ -13,6 +13,7 @@ const (
 	CodeAuthFailed         = "auth_failed"
 	CodeInvalidPrivateKey  = "invalid_private_key"
 	CodePassphraseRequired = "passphrase_required"
+	CodeHostKeyChanged     = "host_key_changed"
 	CodeSSHFailed          = "ssh_failed"
 )
 
@@ -24,8 +25,10 @@ func ClassifyError(err error) (code, message string) {
 	msg := strings.ToLower(err.Error())
 	switch {
 	// Auth failures also contain "handshake failed", so match them first.
+	case strings.Contains(msg, "host key mismatch"):
+		return CodeHostKeyChanged, "The server's SSH host key is not the one that was trusted when this server was first connected. This can mean a man-in-the-middle attack or a reinstalled server. If you expect the change, edit the server and enter its password or key again to trust the new key."
 	case strings.Contains(msg, "passphrase"):
-		return CodePassphraseRequired, "This private key is protected by a passphrase. Passphrase-protected keys are not supported yet."
+		return CodePassphraseRequired, "This private key is protected by a passphrase. Enter the correct passphrase to use it."
 	case strings.Contains(msg, "invalid private key"),
 		strings.Contains(msg, "no key found"),
 		strings.Contains(msg, "private key is required"):
@@ -65,8 +68,10 @@ func PublicError(err error) string {
 		return ""
 	}
 	switch code, _ := ClassifyError(err); code {
+	case CodeHostKeyChanged:
+		return "ssh host key changed"
 	case CodePassphraseRequired:
-		return "passphrase-protected private keys are not supported yet"
+		return "passphrase required or incorrect"
 	case CodeInvalidPrivateKey:
 		return "invalid private key"
 	case CodeAuthFailed:

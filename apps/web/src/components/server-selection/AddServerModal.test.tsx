@@ -68,8 +68,52 @@ describe("AddServerModal", () => {
         authType: "password",
         password: "example-pass",
         privateKey: undefined,
+        saveCredentials: true,
         iconId: "server",
       },
+      { connect: false },
+    );
+  });
+
+  it("sends the passphrase of an encrypted private key", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(<AddServerModal onClose={() => undefined} onSubmit={onSubmit} />);
+
+    await user.type(screen.getByLabelText("Server Name"), "Edge Lab");
+    await user.type(screen.getByLabelText("Host / IP"), "203.0.113.10");
+    await user.type(screen.getByLabelText("Username"), "deploy");
+    await user.click(screen.getByRole("button", { name: "SSH Private Key" }));
+    await user.click(screen.getByPlaceholderText(/BEGIN OPENSSH PRIVATE KEY/));
+    await user.paste("-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----");
+    await user.type(screen.getByLabelText("Key passphrase"), "correct horse");
+    await user.click(screen.getByRole("button", { name: "Save Server" }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ authType: "private_key", passphrase: "correct horse" }),
+      { connect: false },
+    );
+  });
+
+  it("can skip storing the password", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(<AddServerModal onClose={() => undefined} onSubmit={onSubmit} />);
+
+    const remember = screen.getByRole("checkbox", { name: /Remember password/ });
+    expect(remember).toBeChecked();
+    await user.type(screen.getByLabelText("Server Name"), "Edge Lab");
+    await user.type(screen.getByLabelText("Host / IP"), "203.0.113.10");
+    await user.type(screen.getByLabelText("Username"), "deploy");
+    await user.type(screen.getByLabelText("Password"), "example-pass");
+    await user.click(remember);
+    expect(screen.getByText(/Not stored/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save Server" }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ password: "example-pass", saveCredentials: false }),
       { connect: false },
     );
   });

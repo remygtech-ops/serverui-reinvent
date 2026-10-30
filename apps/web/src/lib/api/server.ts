@@ -96,6 +96,7 @@ export type ServerInfo = {
   authType?: "password" | "private_key";
   iconId?: string;
   customIcon?: boolean;
+  credentialsSaved?: boolean;
   updatedAt?: string;
   cpuUsage: number;
   memoryUsage: number;
@@ -190,6 +191,10 @@ export type ServerWriteInput = {
   authType: "password" | "private_key";
   password?: string;
   privateKey?: string;
+  /** Unlocks an encrypted private key. */
+  passphrase?: string;
+  /** Store the password/key encrypted. Defaults to true on the backend. */
+  saveCredentials?: boolean;
   iconId?: string;
   /** Data URL to store, or "" to remove a custom image. Omit to leave it unchanged. */
   iconImage?: string;
@@ -278,10 +283,17 @@ export function testServerDraft(
   });
 }
 
-export function connectServer(id: string) {
+/** The backend answers 428 when a server saved without credentials needs its password/key. */
+export const SECRET_REQUIRED_STATUS = 428;
+
+export function connectServer(
+  id: string,
+  secret?: { password?: string; privateKey?: string; passphrase?: string },
+) {
   return apiRequest<ServerInfo>(`/api/servers/${id}/connect`, {
     method: "POST",
     timeoutMs: 25000,
+    ...(secret ? { body: JSON.stringify(secret) } : {}),
   });
 }
 

@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"serverui/server/internal/crypto"
@@ -21,6 +23,10 @@ type Service struct {
 	pool    *sshx.Pool
 	dial    Dialer
 	iconDir string
+
+	// sessionSecrets holds secrets of servers saved without credentials. Memory only.
+	secretMu       sync.Mutex
+	sessionSecrets map[string]string
 }
 
 type TestResult struct {
@@ -35,6 +41,8 @@ func NewService(store Store, box crypto.Cipher) *Service {
 		store: store,
 		box:   box,
 		dial:  liveDial,
+
+		sessionSecrets: map[string]string{},
 	}
 	s.pool = sshx.NewPool(s.loadAuth)
 	return s
@@ -93,7 +101,11 @@ func (s *Service) Create(ctx context.Context, input Input) (Public, error) {
 	if err != nil {
 		return Public{}, err
 	}
-	encrypted, err := s.box.Encrypt(secret)
+	stored := secret
+	if !input.saveCredentials() {
+		stored = ""
+	}
+	encrypted, err := s.box.Encrypt(stored)
 	if err != nil {
 		return Public{}, fmt.Errorf("unable to store credentials")
 	}
@@ -131,6 +143,9 @@ func (s *Service) Create(ctx context.Context, input Input) (Public, error) {
 	}
 	log.Printf("server.created id=%s name=%s host=%s", rec.ID, rec.Name, rec.Host)
 
+	if !input.saveCredentials() {
+		s.setSessionSecret(rec.ID, secret)
+	}
 	rec, _ = s.testAndUpdate(ctx, rec, secret)
 	return s.public(rec), nil
 }
@@ -141,7 +156,8 @@ func (s *Service) Update(ctx context.Context, id string, input Input) (Public, e
 	if err != nil {
 		return Public{}, err
 	}
-	requireSecret := input.Password != "" || input.PrivateKey != "" || input.AuthType != existing.AuthType
+	requireSecret := input.Password != "" || input.PrivateKey != "" || input.AuthType != existing.AuthType ||
+		!sameDestination(existing, input)
 	if err := Validate(input, requireSecret); err != nil {
 		return Public{}, err
 	}
@@ -159,12 +175,37 @@ func (s *Service) Update(ctx context.Context, id string, input Input) (Public, e
 		existing.Status = StatusUnknown
 	}
 
-	if requireSecret {
-		secret, err := s.secret(input, true)
-		if err != nil {
-			return Public{}, err
+	// Switching "save password" off drops the stored secret; switching it on needs a new one.
+	wasSaved := s.secretSaved(existing.ID)
+	if input.SaveCredentials != nil && *input.SaveCredentials && !wasSaved && !requireSecret {
+		return Public{}, fmt.Errorf("enter the password or private key to save it")
+	}
+	dropSecret := input.SaveCredentials != nil && !*input.SaveCredentials && wasSaved
+	if dropSecret && !requireSecret {
+		// Keep using the stored secret for this session, then forget it on disk.
+		if cred, err := s.store.GetCredential(ctx, existing.ID); err == nil {
+			if plain, err := s.box.Decrypt(cred.EncryptedSecret); err == nil {
+				s.setSessionSecret(existing.ID, plain)
+			}
 		}
-		encrypted, err := s.box.Encrypt(secret)
+	}
+	if requireSecret || dropSecret {
+		secret := ""
+		if requireSecret {
+			var err error
+			secret, err = s.secret(input, true)
+			if err != nil {
+				return Public{}, err
+			}
+		}
+		stored := secret
+		if !input.saveCredentials() {
+			stored = ""
+			if secret != "" {
+				s.setSessionSecret(existing.ID, secret)
+			}
+		}
+		encrypted, err := s.box.Encrypt(stored)
 		if err != nil {
 			return Public{}, fmt.Errorf("unable to store credentials")
 		}
@@ -191,6 +232,16 @@ func (s *Service) Update(ctx context.Context, id string, input Input) (Public, e
 	}
 	if err := s.store.Update(ctx, existing); err != nil {
 		return Public{}, err
+	}
+	if requireSecret {
+		// A new destination, or a secret entered again on purpose, is how the operator accepts a
+		// different host key: forget the old one so the next connection pins the current key.
+		if err := s.store.ClearHostKey(ctx, existing.ID); err != nil {
+			return Public{}, err
+		}
+		existing.HostKey = ""
+		// A Manager created while the old pin was still set would fail closed for the new host.
+		s.pool.Forget(existing.ID)
 	}
 	log.Printf("server.updated id=%s name=%s", existing.ID, existing.Name)
 	if reconnect {
@@ -235,6 +286,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	s.pool.Forget(id)
+	s.clearSessionSecret(id)
 	if err := s.store.Delete(ctx, id); err != nil {
 		return err
 	}
@@ -243,10 +295,19 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *Service) Connect(ctx context.Context, id string) (Public, error) {
+// Connect opens the pooled SSH session. supplied carries the password/key for servers saved
+// without credentials; it is validated, kept in memory only and never written to disk.
+func (s *Service) Connect(ctx context.Context, id string, supplied *Secret) (Public, error) {
 	rec, err := s.store.Get(ctx, id)
 	if err != nil {
 		return Public{}, err
+	}
+	if supplied != nil {
+		secret, err := s.suppliedSecret(rec.AuthType, *supplied)
+		if err != nil {
+			return s.public(rec), err
+		}
+		s.setSessionSecret(rec.ID, secret)
 	}
 	log.Printf("SSH connection requested server=%s", rec.Name)
 	rec.Status = StatusConnecting
@@ -256,6 +317,16 @@ func (s *Service) Connect(ctx context.Context, id string) (Public, error) {
 
 	_, err = s.pool.Ensure(id)
 	if err != nil {
+		if errors.Is(err, ErrSecretRequired) {
+			rec.Status = StatusOffline
+			rec.LastError = ""
+			rec.UpdatedAt = time.Now().UTC()
+			_ = s.store.Update(ctx, rec)
+			return s.public(rec), err
+		}
+		if supplied != nil {
+			s.clearSessionSecret(rec.ID)
+		}
 		rec.Status = statusFromErr(err)
 		rec.LastError = sshx.PublicError(err)
 		rec.UpdatedAt = time.Now().UTC()
@@ -331,6 +402,35 @@ func (s *Service) Test(ctx context.Context, id string) (TestResult, error) {
 	}, nil
 }
 
+// currentHostKey reads the pinned key fresh, so a pooled connection that reconnects later
+// enforces a pin recorded after it was created.
+func (s *Service) currentHostKey(id string) func() string {
+	return func() string {
+		rec, err := s.store.Get(context.Background(), id)
+		if err != nil {
+			return ""
+		}
+		return rec.HostKey
+	}
+}
+
+// pinHostKey returns the first-use callback that stores a server's host key fingerprint. When
+// another connection pinned a different key first, this one is refused instead of accepted.
+func (s *Service) pinHostKey(id string) func(string) error {
+	return func(fingerprint string) error {
+		pinned, err := s.store.SetHostKey(context.Background(), id, fingerprint)
+		if err != nil {
+			log.Printf("server.hostkey id=%s pin failed", id)
+			return fmt.Errorf("unable to record the SSH host key")
+		}
+		if pinned != fingerprint {
+			return fmt.Errorf("host key mismatch: the server presented %s but %s was trusted", fingerprint, pinned)
+		}
+		log.Printf("server.hostkey id=%s pinned", id)
+		return nil
+	}
+}
+
 func (s *Service) loadAuth(id string) (sshx.Config, sshx.AuthMethod, error) {
 	ctx := context.Background()
 	rec, err := s.store.Get(ctx, id)
@@ -342,9 +442,12 @@ func (s *Service) loadAuth(id string) (sshx.Config, sshx.AuthMethod, error) {
 		return sshx.Config{}, nil, err
 	}
 	cfg := sshx.Config{
-		Host:     rec.Host,
-		Port:     rec.Port,
-		Username: rec.Username,
+		Host:          rec.Host,
+		Port:          rec.Port,
+		Username:      rec.Username,
+		PinnedHostKey: rec.HostKey,
+		PinLookup:     s.currentHostKey(rec.ID),
+		OnHostKey:     s.pinHostKey(rec.ID),
 	}
 	return cfg, auth, nil
 }
@@ -359,7 +462,65 @@ func (s *Service) savedAuth(ctx context.Context, rec Record) (sshx.AuthMethod, e
 	if err != nil {
 		return nil, fmt.Errorf("unable to authenticate")
 	}
+	if secret == "" {
+		// Saved without credentials: only a secret entered this session can be used.
+		session, ok := s.sessionSecret(rec.ID)
+		if !ok {
+			return nil, ErrSecretRequired
+		}
+		secret = session
+	}
 	return authMethod(rec.AuthType, secret)
+}
+
+// secretSaved reports whether a password/key is stored (encrypted) for the server.
+func (s *Service) secretSaved(id string) bool {
+	cred, err := s.store.GetCredential(context.Background(), id)
+	if err != nil {
+		return false
+	}
+	secret, err := s.box.Decrypt(cred.EncryptedSecret)
+	return err == nil && secret != ""
+}
+
+func (s *Service) suppliedSecret(authType string, supplied Secret) (string, error) {
+	switch authType {
+	case AuthPassword:
+		if strings.TrimSpace(supplied.Password) == "" {
+			return "", fmt.Errorf("password is required")
+		}
+		return strings.TrimSpace(supplied.Password), nil
+	case AuthPrivateKey:
+		key := strings.TrimSpace(supplied.PrivateKey)
+		if key == "" {
+			return "", fmt.Errorf("private key is required")
+		}
+		if _, err := sshx.ParsePrivateKeyAuth(key, supplied.Passphrase); err != nil {
+			return "", err
+		}
+		return packKey(key, supplied.Passphrase), nil
+	default:
+		return "", fmt.Errorf("invalid authentication type")
+	}
+}
+
+func (s *Service) setSessionSecret(id, secret string) {
+	s.secretMu.Lock()
+	defer s.secretMu.Unlock()
+	s.sessionSecrets[id] = secret
+}
+
+func (s *Service) sessionSecret(id string) (string, bool) {
+	s.secretMu.Lock()
+	defer s.secretMu.Unlock()
+	secret, ok := s.sessionSecrets[id]
+	return secret, ok && secret != ""
+}
+
+func (s *Service) clearSessionSecret(id string) {
+	s.secretMu.Lock()
+	defer s.secretMu.Unlock()
+	delete(s.sessionSecrets, id)
 }
 
 func (s *Service) secret(input Input, required bool) (string, error) {
@@ -373,17 +534,17 @@ func (s *Service) secret(input Input, required bool) (string, error) {
 		if required && input.PrivateKey == "" {
 			return "", fmt.Errorf("private key is required")
 		}
-		if _, err := sshx.ParsePrivateKeyAuth(input.PrivateKey, ""); err != nil {
+		if _, err := sshx.ParsePrivateKeyAuth(input.PrivateKey, input.Passphrase); err != nil {
 			return "", err
 		}
-		return input.PrivateKey, nil
+		return packKey(input.PrivateKey, input.Passphrase), nil
 	default:
 		return "", fmt.Errorf("invalid authentication type")
 	}
 }
 
 func (s *Service) testAndUpdate(ctx context.Context, rec Record, secret string) (Record, error) {
-	cfg := sshx.Config{Host: rec.Host, Port: rec.Port, Username: rec.Username}
+	cfg := sshx.Config{Host: rec.Host, Port: rec.Port, Username: rec.Username, PinnedHostKey: rec.HostKey, OnHostKey: s.pinHostKey(rec.ID)}
 	var auth sshx.AuthMethod
 	var err error
 	if secret != "" {
@@ -423,6 +584,7 @@ func (s *Service) public(rec Record) Public {
 	out := rec.Public()
 	// Connected means a live pooled SSH session, not a previous successful test.
 	out.Connected = live
+	out.CredentialsSaved = s.secretSaved(rec.ID)
 	return out
 }
 
@@ -431,7 +593,8 @@ func authMethod(authType, secret string) (sshx.AuthMethod, error) {
 	case AuthPassword:
 		return sshx.PasswordAuth{Password: secret}, nil
 	case AuthPrivateKey:
-		return sshx.ParsePrivateKeyAuth(secret, "")
+		key, passphrase := unpackKey(secret)
+		return sshx.ParsePrivateKeyAuth(key, passphrase)
 	default:
 		return nil, fmt.Errorf("invalid authentication type")
 	}

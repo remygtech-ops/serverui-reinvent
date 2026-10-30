@@ -10,6 +10,8 @@ import { FileViewer } from "@/src/components/apps/files/viewers/FileViewer";
 import { FilesApp } from "@/src/components/apps/FilesApp";
 import { ServersApp } from "@/src/components/apps/ServersApp";
 import { SettingsApp } from "@/src/components/apps/SettingsApp";
+import { KeyKeyApp } from "@/src/components/apps/KeyKeyApp";
+import { SnippetsApp } from "@/src/components/apps/SnippetsApp";
 import { TerminalApp } from "@/src/components/apps/TerminalApp";
 import { Window } from "@/src/components/window/Window";
 import { WindowServerProvider } from "@/src/lib/window-server";
@@ -60,6 +62,10 @@ function AppBody({
       return <DomainsApp />;
     case "databases":
       return <DatabasesApp />;
+    case "snippets":
+      return <SnippetsApp />;
+    case "keykey":
+      return <KeyKeyApp />;
     case "settings":
       return <SettingsApp />;
     case "about":

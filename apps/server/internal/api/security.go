@@ -2,8 +2,10 @@ package api
 
 import (
 	"crypto/subtle"
+	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -54,7 +56,20 @@ func requestLocalToken(r *http.Request) string {
 	if v := websocketLocalToken(r); v != "" {
 		return v
 	}
+	if !localTokenQueryAllowed(r) {
+		return ""
+	}
 	return strings.TrimSpace(r.URL.Query().Get(LocalAuthQuery))
+}
+
+// localTokenQueryAllowed limits the query-string token to media and download URLs, which an
+// <img>, <video> or download link cannot send a header for. Query strings end up in logs.
+func localTokenQueryAllowed(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	p := r.URL.Path
+	return p == "/api/files/download" || (strings.HasPrefix(p, "/api/servers/") && strings.HasSuffix(p, "/icon"))
 }
 
 func websocketLocalToken(r *http.Request) string {
@@ -119,13 +134,100 @@ func isLoopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// originAllowed applies CORS reflection for web, and a tight allowlist for desktop.
-func originAllowed(origin string) bool {
+// requestOriginAllowed enforces the browser Origin on every request. Non-browser clients send no
+// Origin and pass. Web mode only accepts an Origin on the same host as the request (any port, so
+// the web UI on :3000 can reach the API on :8080) or one listed in SERVERUI_ALLOWED_ORIGINS.
+func requestOriginAllowed(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
+		return true
+	}
+	if DesktopMode() {
+		return originAllowed(origin)
+	}
+	for _, allowed := range strings.Split(os.Getenv("SERVERUI_ALLOWED_ORIGINS"), ",") {
+		if a := strings.TrimSpace(allowed); a != "" && strings.EqualFold(a, origin) {
+			return true
+		}
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Hostname() == "" {
 		return false
 	}
-	if !DesktopMode() {
+	host := strings.ToLower(u.Hostname())
+	if !allowedHostNames()[host] {
+		return false
+	}
+	if strings.EqualFold(hostnameOf(r.Host), host) {
 		return true
+	}
+	// Behind the Next proxy the request carries the browser's host in X-Forwarded-Host.
+	return strings.EqualFold(hostnameOf(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Host"), ",")[0])), host)
+}
+
+// defaultAllowedHosts are the names the web deployment answers to out of the box: this machine,
+// and "server", the compose service name the Next proxy uses.
+var defaultAllowedHosts = []string{"localhost", "127.0.0.1", "::1", "server"}
+
+// allowedHostNames is the set of Host names the API serves in web mode. A page on any other name
+// that resolves to this machine (DNS rebinding) is refused, whatever Origin it sends. Add the
+// names you really use with SERVERUI_ALLOWED_HOSTS (a LAN address, a domain behind a proxy).
+func allowedHostNames() map[string]bool {
+	set := map[string]bool{}
+	for _, h := range defaultAllowedHosts {
+		set[h] = true
+	}
+	for _, h := range strings.Split(os.Getenv("SERVERUI_ALLOWED_HOSTS"), ",") {
+		if h = strings.ToLower(hostnameOf(strings.TrimSpace(h))); h != "" {
+			set[h] = true
+		}
+	}
+	for _, o := range strings.Split(os.Getenv("SERVERUI_ALLOWED_ORIGINS"), ",") {
+		if u, err := url.Parse(strings.TrimSpace(o)); err == nil && u.Hostname() != "" {
+			set[strings.ToLower(u.Hostname())] = true
+		}
+	}
+	return set
+}
+
+// webHostAllowed checks the Host header and every X-Forwarded-Host value. A browser cannot forge
+// Host, so after a DNS rebinding the attacker's own name is what shows up here.
+func webHostAllowed(r *http.Request) bool {
+	allowed := allowedHostNames()
+	if !allowed[strings.ToLower(hostnameOf(r.Host))] {
+		return false
+	}
+	// Every header line and every comma-separated value counts, not just the first one.
+	for _, line := range r.Header.Values("X-Forwarded-Host") {
+		for _, v := range strings.Split(line, ",") {
+			if v = strings.TrimSpace(v); v != "" && !allowed[strings.ToLower(hostnameOf(v))] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func hostnameOf(hostport string) string {
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		return strings.Trim(h, "[]")
+	}
+	return strings.Trim(hostport, "[]")
+}
+
+// ValidateAuthConfig fails closed on a desktop-mode start without a local token, which would
+// otherwise leave the API open on loopback.
+func ValidateAuthConfig() error {
+	if DesktopMode() && localAuthToken() == "" {
+		return errors.New("SERVERUI_DESKTOP is set but SERVERUI_LOCAL_AUTH_TOKEN is empty")
+	}
+	return nil
+}
+
+// originAllowed is the desktop allowlist: the packaged app and local development pages only.
+func originAllowed(origin string) bool {
+	if origin == "" || !DesktopMode() {
+		return false
 	}
 	o := strings.TrimSpace(origin)
 	switch {

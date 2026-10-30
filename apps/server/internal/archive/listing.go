@@ -57,27 +57,46 @@ func (e *UnsafeError) Error() string {
 	return fmt.Sprintf("archive was not extracted: entry %q %s", name, e.Reason)
 }
 
-// ParseTarListing parses `tar -tv` output from GNU tar, BusyBox tar or bsdtar.
+// Tar listings are human-readable text whose owner and group columns come from the archive, so a
+// name such as "g 5" shifts every later column. The parser therefore anchors on the timestamp
+// instead of counting columns, and refuses any line where that anchor is not unique: owner and
+// group text can then never reach the name or the link target.
+const monthPattern = `(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)`
+
+var (
+	tarISOStamp   = regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?`)
+	tarMonthStamp = regexp.MustCompile(monthPattern + ` +\d{1,2} +(?:\d{2}:\d{2}|\d{4})`)
+	// GNU tar and BusyBox: mode owner/group size date time name
+	tarGNULine = regexp.MustCompile(`^(\S+)\s+(.+?)\s+(\d+|\d+,\s*\d+)\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?\s+(.+)$`)
+	// bsdtar: mode links owner group size month day time-or-year name
+	tarBSDLine = regexp.MustCompile(`^(\S+)\s+\d+\s+(.+?)\s+(\d+|\d+,\s*\d+)\s+` + monthPattern + ` +\d{1,2} +(?:\d{2}:\d{2}|\d{4})\s+(.+)$`)
+)
+
+// ParseTarListing parses `tar -tv` output from GNU tar, BusyBox tar or bsdtar. Any line that
+// does not fit exactly one known layout is refused, never guessed.
 func ParseTarListing(out string) ([]Entry, error) {
 	var entries []Entry
 	for _, line := range strings.Split(out, "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		fields, rest := splitFields(line, 5)
-		if len(fields) < 5 || rest == "" {
+		var m []string
+		switch {
+		case len(tarISOStamp.FindAllStringIndex(line, -1)) == 1 && len(tarMonthStamp.FindAllStringIndex(line, -1)) == 0:
+			m = tarGNULine.FindStringSubmatch(line)
+		case len(tarISOStamp.FindAllStringIndex(line, -1)) == 0 && len(tarMonthStamp.FindAllStringIndex(line, -1)) == 1:
+			m = tarBSDLine.FindStringSubmatch(line)
+		}
+		if m == nil {
 			return nil, errUnreadableEntry
 		}
-		sizeField := fields[2]
-		if !strings.Contains(fields[1], "/") {
-			// bsdtar: mode, links, owner, group, size, month, day, time-or-year.
-			fields, rest = splitFields(line, 8)
-			if len(fields) < 8 || rest == "" {
+		mode, sizeField, rest := m[1], m[len(m)-2], m[len(m)-1]
+		for _, r := range rest {
+			if r < 0x20 || r == 0x7f {
 				return nil, errUnreadableEntry
 			}
-			sizeField = fields[4]
 		}
-		entry := Entry{Kind: kindFromMode(fields[0])}
+		entry := Entry{Kind: kindFromMode(mode)}
 		size, err := strconv.ParseInt(sizeField, 10, 64)
 		if err != nil {
 			// Device nodes print "major,minor" instead of a size.
@@ -87,10 +106,19 @@ func ParseTarListing(out string) ([]Entry, error) {
 		entry.Name = rest
 		switch entry.Kind {
 		case KindSymlink:
+			// A name or target containing the separator makes the split ambiguous: refuse it.
+			if strings.Count(rest, " -> ") != 1 {
+				return nil, errUnreadableEntry
+			}
 			entry.Name, entry.Link, _ = strings.Cut(rest, " -> ")
 		case KindHardlink, KindFile:
-			if name, target, ok := strings.Cut(rest, " link to "); ok {
+			switch strings.Count(rest, " link to ") {
+			case 0:
+			case 1:
+				name, target, _ := strings.Cut(rest, " link to ")
 				entry.Name, entry.Link, entry.Kind = name, target, KindHardlink
+			default:
+				return nil, errUnreadableEntry
 			}
 		}
 		entries = append(entries, entry)
@@ -199,6 +227,13 @@ func Inspect(entries []Entry) (Summary, error) {
 
 	names := make([]string, 0, len(entries))
 	symlinks := map[string]bool{}
+	for _, entry := range entries {
+		if entry.Kind == KindSymlink {
+			if n, err := safeName(entry.Name); err == nil && n != "" {
+				symlinks[n] = true
+			}
+		}
+	}
 	seen := map[string]int{}
 	top := map[string]bool{}
 	var total int64
@@ -214,13 +249,19 @@ func Inspect(entries []Entry) (Summary, error) {
 		case KindOther:
 			return Summary{}, &UnsafeError{Name: entry.Name, Reason: "is a device or special file"}
 		case KindSymlink:
-			if escapes(name, entry.Link) {
+			if escapes(name, entry.Link) || throughSymlink(name, entry.Link, symlinks) {
 				return Summary{}, &UnsafeError{Name: entry.Name, Reason: "links outside the extraction folder"}
 			}
-			symlinks[name] = true
 		case KindHardlink:
-			if _, err := safeName(entry.Link); err != nil {
+			target, err := safeName(entry.Link)
+			if err != nil {
 				return Summary{}, &UnsafeError{Name: entry.Name, Reason: "links outside the extraction folder"}
+			}
+			// tar makes a hard link to a symlink another symlink with the same relative target. At a
+			// different depth that target can leave the folder, and the symlink checks above never
+			// see it, so a hard link to a symlink (or through one) is refused outright.
+			if symlinks[target] || throughSymlink(name, entry.Link, symlinks) {
+				return Summary{}, &UnsafeError{Name: entry.Name, Reason: "is a hard link to a symbolic link"}
 			}
 		}
 		names = append(names, name)
@@ -289,6 +330,28 @@ func escapes(name, target string) bool {
 	}
 	resolved := path.Join(path.Dir(name), target)
 	return resolved == ".." || strings.HasPrefix(resolved, "../")
+}
+
+// throughSymlink reports whether resolving target walks through another archived symlink before
+// its last component. The lexical check in escapes() cannot see where that detour leads, as in
+// "sub/up -> .." followed by "x -> sub/up/../..".
+func throughSymlink(name, target string, symlinks map[string]bool) bool {
+	cur := path.Dir(name)
+	parts := strings.Split(target, "/")
+	for i, part := range parts {
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			cur = path.Dir(cur)
+		default:
+			cur = path.Join(cur, part)
+			if i < len(parts)-1 && symlinks[cur] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func kindFromMode(mode string) EntryKind {

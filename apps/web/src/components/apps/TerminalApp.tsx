@@ -2,18 +2,30 @@
 
 import { useEffect, useRef, useState } from "react";
 import "@xterm/xterm/css/xterm.css";
-import { Plus, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, Search, X } from "lucide-react";
 import type { WindowPayload } from "@/src/components/window/window-context";
 import { wsUrl } from "@/src/lib/api/origin";
 import { getInjectedDesktopConfig, localAuthWSProtocols } from "@/src/lib/runtime/config";
 import { ServerIcon } from "@/src/components/servers/ServerIcon";
 import { useSession } from "@/src/lib/session";
+import { listenForTerminalInput, takePendingTerminalInput } from "@/src/lib/terminal-bus";
 import { isSampleServer } from "@/src/lib/sample-servers";
 import type { Server } from "@/src/lib/servers";
+import {
+  FONT_FAMILIES,
+  clampFontSize,
+  useTerminalPrefs,
+  writeTerminalPrefs,
+  type TerminalPrefs,
+} from "@/src/lib/terminal-prefs";
+import { getTerminalTheme } from "@/src/lib/terminal-themes";
+import { installPromptHighlight } from "@/src/lib/terminal-prompt";
 
 function quotePath(value: string) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
+
+const MAX_AUTO_RETRIES = 4;
 
 type Tab = {
   id: string;
@@ -213,12 +225,40 @@ function TerminalSession({
   const host = useRef<HTMLDivElement>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const fitRef = useRef<{ fit: () => void } | null>(null);
-  const termRef = useRef<{ cols: number; rows: number } | null>(null);
+  const termRef = useRef<import("@xterm/xterm").Terminal | null>(null);
+  const searchRef = useRef<import("@xterm/addon-search").SearchAddon | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const { prefs } = useTerminalPrefs();
+  const prefsRef = useRef<TerminalPrefs>(prefs);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const themeDef = getTerminalTheme(prefs.themeId);
+  const light = themeDef.id === "solarized-light";
+  const transparent = themeDef.theme.background === "#00000000";
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const retries = useRef(0);
   const serverId = server.id;
   const serverName = server.name;
+
+  // Live-apply preference changes (settings preview, zoom) to the open terminal.
+  useEffect(() => {
+    prefsRef.current = prefs;
+    const terminal = termRef.current;
+    if (!terminal) return;
+    const def = getTerminalTheme(prefs.themeId);
+    terminal.options.theme = { ...def.theme };
+    terminal.options.fontSize = prefs.fontSize;
+    terminal.options.fontFamily = FONT_FAMILIES[prefs.fontFamily].stack;
+    terminal.options.cursorStyle = prefs.cursorStyle;
+    terminal.options.cursorBlink = prefs.cursorBlink;
+    fitRef.current?.fit();
+    const socket = socketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }));
+    }
+  }, [prefs]);
 
   useEffect(() => {
     if (!active) return;
@@ -236,34 +276,131 @@ function TerminalSession({
     if (!container) return;
 
     let disposed = false;
+    let retryTimer: number | undefined;
     let socket: WebSocket | null = null;
     let terminal: import("@xterm/xterm").Terminal | null = null;
     let observer: ResizeObserver | null = null;
+    let promptHighlight: { dispose: () => void } | null = null;
+    let removeListeners: (() => void) | null = null;
+
+    // A dropped session reconnects on its own a few times (1.5s, 3s, 4.5s...) before asking the user.
+    function scheduleRetry() {
+      if (disposed || retryTimer !== undefined || retries.current >= MAX_AUTO_RETRIES) return false;
+      retries.current += 1;
+      const attempt = retries.current;
+      setStatus("connecting");
+      setError(`Connection lost. Reconnecting (${attempt}/${MAX_AUTO_RETRIES})…`);
+      retryTimer = window.setTimeout(() => setNonce((value) => value + 1), 1500 * attempt);
+      return true;
+    }
 
     async function connect() {
       try {
-        const [{ Terminal }, { FitAddon }] = await Promise.all([
+        const [{ Terminal }, { FitAddon }, { SearchAddon }] = await Promise.all([
           import("@xterm/xterm"),
           import("@xterm/addon-fit"),
+          import("@xterm/addon-search"),
         ]);
         if (disposed || !host.current) return;
 
+        const initial = prefsRef.current;
         terminal = new Terminal({
-          cursorBlink: true,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-          fontSize: 13,
-          theme: {
-            background: "#00000000",
-            foreground: "#d7ffd9",
-            cursor: "#5fff6a",
-          },
+          cursorBlink: initial.cursorBlink,
+          cursorStyle: initial.cursorStyle,
+          fontFamily: FONT_FAMILIES[initial.fontFamily].stack,
+          fontSize: initial.fontSize,
+          theme: { ...getTerminalTheme(initial.themeId).theme },
+          allowTransparency: true,
         });
         const fitAddon = new FitAddon();
+        const searchAddon = new SearchAddon();
         fitRef.current = fitAddon;
+        searchRef.current = searchAddon;
         termRef.current = terminal;
         terminal.loadAddon(fitAddon);
+        terminal.loadAddon(searchAddon);
         terminal.open(host.current);
         fitAddon.fit();
+        promptHighlight = installPromptHighlight(terminal, {
+          enabled: () => prefsRef.current.highlightPrompt,
+          colors: () => {
+            const def = getTerminalTheme(prefsRef.current.themeId);
+            return { user: def.promptUser, path: def.promptPath };
+          },
+        });
+
+        const term = terminal;
+        const copySelection = () => {
+          const text = term.getSelection();
+          if (text) void navigator.clipboard?.writeText(text).catch(() => {});
+        };
+        const pasteClipboard = () => {
+          void navigator.clipboard
+            ?.readText()
+            .then((text) => text && term.paste(text))
+            .catch(() => {});
+        };
+        term.attachCustomKeyEventHandler((event) => {
+          if (event.type !== "keydown") return true;
+          const mod = event.ctrlKey || event.metaKey;
+          if (!mod) return true;
+          const size = prefsRef.current.fontSize;
+          if (!event.shiftKey || event.key === "+") {
+            if (event.key === "=" || event.key === "+") {
+              event.preventDefault();
+              writeTerminalPrefs({ fontSize: clampFontSize(size + 1) });
+              return false;
+            }
+            if (event.key === "-" || event.key === "_") {
+              event.preventDefault();
+              writeTerminalPrefs({ fontSize: clampFontSize(size - 1) });
+              return false;
+            }
+            if (event.key === "0" && !event.shiftKey) {
+              event.preventDefault();
+              writeTerminalPrefs({ fontSize: 13 });
+              return false;
+            }
+          }
+          if (event.shiftKey && event.key.toLowerCase() === "f") {
+            event.preventDefault();
+            setSearchOpen(true);
+            window.setTimeout(() => searchInputRef.current?.focus(), 0);
+            return false;
+          }
+          if (event.shiftKey && event.key.toLowerCase() === "c") {
+            event.preventDefault();
+            copySelection();
+            return false;
+          }
+          return true;
+        });
+        const onWheel = (event: WheelEvent) => {
+          if (!event.ctrlKey && !event.metaKey) return;
+          event.preventDefault();
+          const next = prefsRef.current.fontSize + (event.deltaY < 0 ? 1 : -1);
+          writeTerminalPrefs({ fontSize: clampFontSize(next) });
+        };
+        const onContextMenu = (event: MouseEvent) => {
+          if (!prefsRef.current.rightClickPaste) return;
+          event.preventDefault();
+          if (term.hasSelection()) {
+            copySelection();
+            term.clearSelection();
+          } else {
+            pasteClipboard();
+          }
+        };
+        const hostEl = host.current;
+        hostEl.addEventListener("wheel", onWheel, { passive: false });
+        hostEl.addEventListener("contextmenu", onContextMenu);
+        removeListeners = () => {
+          hostEl.removeEventListener("wheel", onWheel);
+          hostEl.removeEventListener("contextmenu", onContextMenu);
+        };
+        term.onSelectionChange(() => {
+          if (prefsRef.current.copyOnSelect && term.hasSelection()) copySelection();
+        });
 
         socket = new WebSocket(
           wsUrl(`/ws/terminal?serverId=${encodeURIComponent(serverId)}`),
@@ -284,6 +421,7 @@ function TerminalSession({
         socket.onopen = () => {
           window.clearTimeout(timeout);
           if (!terminal) return;
+          retries.current = 0;
           setStatus("connected");
           setError(null);
           fitAddon.fit();
@@ -317,12 +455,14 @@ function TerminalSession({
         socket.onerror = () => {
           window.clearTimeout(timeout);
           if (disposed) return;
+          if (scheduleRetry()) return;
           setError("Terminal disconnected. Reconnect when the server is available.");
           setStatus("disconnected");
         };
         socket.onclose = () => {
           window.clearTimeout(timeout);
           if (disposed) return;
+          if (scheduleRetry()) return;
           setStatus("disconnected");
         };
 
@@ -348,14 +488,32 @@ function TerminalSession({
 
     return () => {
       disposed = true;
+      window.clearTimeout(retryTimer);
       observer?.disconnect();
+      removeListeners?.();
+      promptHighlight?.dispose();
       socket?.close();
       socketRef.current = null;
       fitRef.current = null;
+      searchRef.current = null;
       termRef.current = null;
       terminal?.dispose();
     };
   }, [nonce, server.connected, serverId]);
+
+  // Text sent by other apps (Snippets...) goes to the visible session only.
+  useEffect(() => {
+    if (!active || status !== "connected") return;
+    const send = (text: string, run?: boolean) => {
+      const socket = socketRef.current;
+      if (socket?.readyState !== WebSocket.OPEN) return false;
+      socket.send(new TextEncoder().encode(run ? `${text}\n` : text));
+      return true;
+    };
+    const queued = takePendingTerminalInput();
+    if (queued) send(queued.text, queued.run);
+    return listenForTerminalInput((input) => send(input.text, input.run));
+  }, [active, status]);
 
   useEffect(() => {
     if (status !== "connected" || !cwd || !socketRef.current) return;
@@ -401,30 +559,119 @@ function TerminalSession({
     );
   }
 
+  const statusButton = light
+    ? "bg-black/10 text-zinc-900 hover:bg-black/15"
+    : "bg-white/10 text-white hover:bg-white/15";
+
+  function runSearch(direction: "next" | "previous", term = searchTerm) {
+    const addon = searchRef.current;
+    if (!addon || !term) return;
+    if (direction === "next") addon.findNext(term);
+    else addon.findPrevious(term);
+  }
+
   return (
-    <div className={active ? "absolute inset-0 flex flex-col text-[#5fff6a]" : "hidden"}>
-      <div className="flex items-center justify-between gap-3 px-3 py-2 text-[11px] text-white/70">
+    <div
+      className={active ? "absolute inset-0 flex flex-col" : "hidden"}
+      style={{
+        color: themeDef.theme.foreground,
+        background: transparent ? undefined : themeDef.theme.background,
+      }}
+    >
+      <div className="flex items-center justify-between gap-3 px-3 py-2 text-[11px] opacity-75">
         <span>
           {status === "connecting"
-            ? `Connecting to ${serverName}…`
+            ? error || `Connecting to ${serverName}…`
             : status === "connected"
               ? `Connected to ${serverName}`
               : error || "Terminal disconnected"}
         </span>
-        {status !== "connected" ? (
+        <div className="flex items-center gap-1.5">
+          <span className="tabular-nums" title="Ctrl +, Ctrl −, Ctrl 0 or Ctrl + mouse wheel">
+            {prefs.fontSize}px
+          </span>
           <button
             type="button"
-            className="rounded-md bg-white/10 px-2 py-1 text-white outline-none hover:bg-white/15 focus-visible:ring-2 focus-visible:ring-emerald-400"
+            aria-label="Search in terminal"
+            title="Search (Ctrl+Shift+F)"
+            className={`flex size-6 items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${statusButton}`}
             onClick={() => {
-              setStatus("connecting");
-              setError(null);
-              setNonce((value) => value + 1);
+              setSearchOpen((open) => !open);
+              window.setTimeout(() => searchInputRef.current?.focus(), 0);
             }}
           >
-            Reconnect
+            <Search className="size-3.5" />
           </button>
-        ) : null}
+          {status !== "connected" ? (
+            <button
+              type="button"
+              className={`rounded-md px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${statusButton}`}
+              onClick={() => {
+                retries.current = 0;
+                setStatus("connecting");
+                setError(null);
+                setNonce((value) => value + 1);
+              }}
+            >
+              Reconnect
+            </button>
+          ) : null}
+        </div>
       </div>
+      {searchOpen ? (
+        <div
+          role="search"
+          className="absolute top-10 right-3 z-10 flex items-center gap-1 rounded-lg border border-white/15 bg-zinc-950/90 p-1 text-white shadow-lg"
+        >
+          <input
+            ref={searchInputRef}
+            aria-label="Search terminal output"
+            value={searchTerm}
+            placeholder="Find…"
+            className="h-6 w-40 rounded-md bg-white/10 px-2 text-[12px] outline-none placeholder:text-white/40 focus-visible:ring-2 focus-visible:ring-emerald-400"
+            onChange={(event) => {
+              setSearchTerm(event.target.value);
+              runSearch("next", event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") runSearch(event.shiftKey ? "previous" : "next");
+              if (event.key === "Escape") {
+                setSearchOpen(false);
+                searchRef.current?.clearDecorations();
+                termRef.current?.focus();
+              }
+            }}
+          />
+          <button
+            type="button"
+            aria-label="Previous match"
+            className="flex size-6 items-center justify-center rounded-md hover:bg-white/10"
+            onClick={() => runSearch("previous")}
+          >
+            <ChevronUp className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            aria-label="Next match"
+            className="flex size-6 items-center justify-center rounded-md hover:bg-white/10"
+            onClick={() => runSearch("next")}
+          >
+            <ChevronDown className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            aria-label="Close search"
+            className="flex size-6 items-center justify-center rounded-md hover:bg-white/10"
+            onClick={() => {
+              setSearchOpen(false);
+              searchRef.current?.clearDecorations();
+              termRef.current?.focus();
+            }}
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      ) : null}
       <div ref={host} className="min-h-0 flex-1 px-2 pb-2" />
     </div>
   );

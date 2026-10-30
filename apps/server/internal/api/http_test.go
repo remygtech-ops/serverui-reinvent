@@ -100,27 +100,30 @@ func TestLocalAuthAcceptsHeader(t *testing.T) {
 	}
 }
 
-func TestLocalAuthAcceptsQuery(t *testing.T) {
+func TestLocalAuthQueryTokenOnlyForMediaRoutes(t *testing.T) {
 	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "test-local-token-value")
 	t.Setenv("SERVERUI_DESKTOP", "1")
-	handler := (&Server{}).Handler()
-	req := httptest.NewRequest(http.MethodGet, "/healthz?localToken=test-local-token-value", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status %d", rec.Code)
+	for _, path := range []string{"/api/files/download?localToken=test-local-token-value", "/api/servers/abc/icon?localToken=test-local-token-value"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if requestLocalToken(req) != "test-local-token-value" {
+			t.Fatalf("%s should accept the query token", path)
+		}
 	}
-}
-
-func TestLocalAuthAcceptsWebSocketProtocol(t *testing.T) {
-	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "test-local-token-value")
-	t.Setenv("SERVERUI_DESKTOP", "1")
+	for _, path := range []string{"/healthz?localToken=test-local-token-value", "/api/servers?localToken=test-local-token-value", "/ws/terminal?localToken=test-local-token-value"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if requestLocalToken(req) != "" {
+			t.Fatalf("%s must not accept the query token", path)
+		}
+	}
+	post := httptest.NewRequest(http.MethodPost, "/api/files/download?localToken=test-local-token-value", nil)
+	if requestLocalToken(post) != "" {
+		t.Fatal("only GET/HEAD may use the query token")
+	}
+	// The generic route is rejected end to end.
 	handler := (&Server{}).Handler()
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
-	req.Header.Set("Sec-WebSocket-Protocol", LocalAuthWSProtocolPrefix+"test-local-token-value")
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz?localToken=test-local-token-value", nil))
+	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d", rec.Code)
 	}
 }
@@ -200,8 +203,11 @@ func TestParseByteRange(t *testing.T) {
 func TestCORSPreflight(t *testing.T) {
 	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "")
 	t.Setenv("SERVERUI_DESKTOP", "")
+	t.Setenv("SERVERUI_ALLOWED_ORIGINS", "")
 	handler := (&Server{}).Handler()
+	// The web UI (:3000) and the API (:8080) share a host name, so the UI origin is accepted.
 	req := httptest.NewRequest(http.MethodOptions, "/healthz", nil)
+	req.Host = "localhost:8080"
 	req.Header.Set("Origin", "http://localhost:3000")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -210,6 +216,141 @@ func TestCORSPreflight(t *testing.T) {
 	}
 	if rec.Header().Get("Access-Control-Allow-Origin") != "http://localhost:3000" {
 		t.Fatalf("cors %q", rec.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
+
+func TestWebModeRejectsForeignOrigins(t *testing.T) {
+	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "")
+	t.Setenv("SERVERUI_DESKTOP", "")
+	t.Setenv("SERVERUI_ALLOWED_ORIGINS", "")
+	handler := (&Server{}).Handler()
+	for _, method := range []string{http.MethodOptions, http.MethodGet, http.MethodPost} {
+		req := httptest.NewRequest(method, "/healthz", nil)
+		req.Host = "localhost:8080"
+		req.Header.Set("Origin", "https://evil.example")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s from a foreign origin: status %d", method, rec.Code)
+		}
+		if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Fatalf("%s: foreign origin was reflected", method)
+		}
+	}
+	// A WebSocket upgrade is a GET with an Origin; it is refused before the handler runs.
+	ws := httptest.NewRequest(http.MethodGet, "/ws/terminal?serverId=x", nil)
+	ws.Host = "localhost:8080"
+	ws.Header.Set("Origin", "https://evil.example")
+	ws.Header.Set("Connection", "Upgrade")
+	ws.Header.Set("Upgrade", "websocket")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, ws)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("websocket from a foreign origin: status %d", rec.Code)
+	}
+	// Requests without an Origin (curl, the desktop shell health check) are unaffected.
+	plain := httptest.NewRecorder()
+	handler.ServeHTTP(plain, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if plain.Code != http.StatusOK {
+		t.Fatalf("no-origin request: status %d", plain.Code)
+	}
+}
+
+func TestWebModeOriginRules(t *testing.T) {
+	t.Setenv("SERVERUI_DESKTOP", "")
+	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "")
+	t.Setenv("SERVERUI_ALLOWED_HOSTS", "10.0.0.5,ui.example.test")
+	t.Setenv("SERVERUI_ALLOWED_ORIGINS", "https://panel.example.test")
+	mk := func(host, origin, xfh string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		r.Host = host
+		r.Header.Set("Origin", origin)
+		if xfh != "" {
+			r.Header.Set("X-Forwarded-Host", xfh)
+		}
+		return r
+	}
+	cases := []struct {
+		name string
+		req  *http.Request
+		want bool
+	}{
+		{"loopback, other port", mk("localhost:8080", "http://localhost:3000", ""), true},
+		{"allowed LAN address, other port", mk("10.0.0.5:8080", "http://10.0.0.5:3000", ""), true},
+		{"ipv6 loopback", mk("[::1]:8080", "http://[::1]:3000", ""), true},
+		{"through the Next proxy", mk("server:8080", "https://ui.example.test", "ui.example.test"), true},
+		{"listed origin", mk("server:8080", "https://panel.example.test", ""), true},
+		{"foreign origin", mk("localhost:8080", "https://evil.example", ""), false},
+		{"null origin", mk("localhost:8080", "null", ""), false},
+		{"forwarded host of another site", mk("server:8080", "https://evil.example", "ui.example.test"), false},
+		{"origin of an allowed name on a different host", mk("localhost:8080", "http://10.0.0.5:3000", ""), false},
+		{"no origin", httptest.NewRequest(http.MethodGet, "/healthz", nil), true},
+	}
+	for _, c := range cases {
+		if got := requestOriginAllowed(c.req); got != c.want {
+			t.Fatalf("%s: got %v want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestWebModeRefusesRebindingHosts(t *testing.T) {
+	t.Setenv("SERVERUI_DESKTOP", "")
+	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "")
+	t.Setenv("SERVERUI_ALLOWED_HOSTS", "")
+	t.Setenv("SERVERUI_ALLOWED_ORIGINS", "")
+	handler := (&Server{}).Handler()
+	do := func(method, host, origin, xfh string) int {
+		req := httptest.NewRequest(method, "/healthz", nil)
+		req.Host = host
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		if xfh != "" {
+			req.Header.Set("X-Forwarded-Host", xfh)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	// After a DNS rebinding the browser sends the attacker's name as Host and Origin, and a
+	// same-origin GET carries no Origin at all. None of them may reach the API.
+	if got := do(http.MethodGet, "rebind.evil.example:8080", "http://rebind.evil.example:8080", ""); got != http.StatusForbidden {
+		t.Fatalf("rebinding with Origin: status %d", got)
+	}
+	if got := do(http.MethodGet, "rebind.evil.example:8080", "", ""); got != http.StatusForbidden {
+		t.Fatalf("rebinding without Origin: status %d", got)
+	}
+	if got := do(http.MethodOptions, "rebind.evil.example:8080", "http://rebind.evil.example:8080", ""); got != http.StatusForbidden {
+		t.Fatalf("rebinding preflight: status %d", got)
+	}
+	// A rebound page is same-origin, so it can set X-Forwarded-Host itself; the proxy appends the
+	// real name, and any unknown name in the list refuses the request.
+	if got := do(http.MethodGet, "server:8080", "", "localhost, rebind.evil.example:3000"); got != http.StatusForbidden {
+		t.Fatalf("forged forwarded host: status %d", got)
+	}
+	// A second X-Forwarded-Host header line is checked too.
+	multi := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	multi.Host = "server:8080"
+	multi.Header.Add("X-Forwarded-Host", "localhost:3000")
+	multi.Header.Add("X-Forwarded-Host", "rebind.evil.example")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, multi)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("second forwarded host line: status %d", rec.Code)
+	}
+	// Legitimate names still work, including the Next proxy case.
+	for _, c := range []struct{ host, origin, xfh string }{
+		{"localhost:8080", "", ""},
+		{"127.0.0.1:8080", "", ""},
+		{"server:8080", "http://localhost:3000", "localhost:3000"},
+	} {
+		if got := do(http.MethodGet, c.host, c.origin, c.xfh); got != http.StatusOK {
+			t.Fatalf("%+v: status %d", c, got)
+		}
+	}
+	t.Setenv("SERVERUI_ALLOWED_HOSTS", "192.168.1.5")
+	if got := do(http.MethodGet, "192.168.1.5:8080", "http://192.168.1.5:3000", ""); got != http.StatusOK {
+		t.Fatalf("configured LAN host: status %d", got)
 	}
 }
 
@@ -224,8 +365,42 @@ func TestOriginAllowedHelpers(t *testing.T) {
 	}
 	t.Setenv("SERVERUI_DESKTOP", "")
 	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "")
-	if !originAllowed("https://app.example.test") {
-		t.Fatal("web should reflect")
+	if originAllowed("https://app.example.test") {
+		t.Fatal("the desktop allowlist must not apply to web mode")
+	}
+}
+
+func TestJSONBodiesNeedAJSONContentType(t *testing.T) {
+	t.Setenv("SERVERUI_DESKTOP", "")
+	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "")
+	handler := (&Server{}).Handler()
+	for _, ct := range []string{"text/plain", "application/x-www-form-urlencoded", ""} {
+		req := httptest.NewRequest(http.MethodPost, "/api/servers", strings.NewReader(`{"name":"x"}`))
+		if ct != "" {
+			req.Header.Set("Content-Type", ct)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("content type %q: status %d", ct, rec.Code)
+		}
+	}
+}
+
+func TestDesktopModeRequiresAToken(t *testing.T) {
+	t.Setenv("SERVERUI_DESKTOP", "1")
+	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "")
+	if ValidateAuthConfig() == nil {
+		t.Fatal("desktop mode without a token must fail closed")
+	}
+	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "x")
+	if err := ValidateAuthConfig(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SERVERUI_DESKTOP", "")
+	t.Setenv("SERVERUI_LOCAL_AUTH_TOKEN", "")
+	if err := ValidateAuthConfig(); err != nil {
+		t.Fatal(err)
 	}
 }
 

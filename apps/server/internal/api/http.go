@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -77,8 +78,18 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("/ws/terminal", s.term)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !DesktopMode() && !webHostAllowed(r) {
+			// DNS rebinding: the browser treats the attacker's name as this server. Host cannot be forged.
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "host not allowed"})
+			return
+		}
 		origin := r.Header.Get("Origin")
-		if originAllowed(origin) {
+		if origin != "" && !requestOriginAllowed(r) {
+			// Browsers always send Origin on cross-site requests and WebSocket upgrades.
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "origin not allowed"})
+			return
+		}
+		if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS")
@@ -88,10 +99,6 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 		w.Header().Set("Pragma", "no-cache")
 		if r.Method == http.MethodOptions {
-			if origin != "" && !originAllowed(origin) {
-				w.WriteHeader(http.StatusForbidden)
-				return
-			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -116,8 +123,11 @@ type serverBody struct {
 	AuthType   string  `json:"authType"`
 	Password   string  `json:"password"`
 	PrivateKey string  `json:"privateKey"`
+	Passphrase string  `json:"passphrase"`
 	IconID     string  `json:"iconId"`
 	IconImage  *string `json:"iconImage"`
+	// SaveCredentials is optional; omitted means the password/key is stored (encrypted).
+	SaveCredentials *bool `json:"saveCredentials"`
 }
 
 func (b serverBody) input() servers.Input {
@@ -129,8 +139,11 @@ func (b serverBody) input() servers.Input {
 		AuthType:   b.AuthType,
 		Password:   b.Password,
 		PrivateKey: b.PrivateKey,
+		Passphrase: b.Passphrase,
 		IconID:     b.IconID,
 		IconImage:  b.IconImage,
+
+		SaveCredentials: b.SaveCredentials,
 	}
 }
 
@@ -236,8 +249,34 @@ func (s *Server) testServerDraft(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// connectBody optionally carries the password/key of a server saved without credentials.
+type connectBody struct {
+	Password   string `json:"password"`
+	PrivateKey string `json:"privateKey"`
+	Passphrase string `json:"passphrase"`
+}
+
 func (s *Server) connectServer(w http.ResponseWriter, r *http.Request) {
-	item, err := s.servers.Connect(r.Context(), r.PathValue("id"))
+	var supplied *servers.Secret
+	if r.ContentLength != 0 {
+		var body connectBody
+		if err := decodeJSON(w, r, &body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+			return
+		}
+		if body.Password != "" || body.PrivateKey != "" {
+			supplied = &servers.Secret{Password: body.Password, PrivateKey: body.PrivateKey, Passphrase: body.Passphrase}
+		}
+	}
+	item, err := s.servers.Connect(r.Context(), r.PathValue("id"), supplied)
+	if errors.Is(err, servers.ErrSecretRequired) {
+		writeJSON(w, http.StatusPreconditionRequired, map[string]any{
+			"error":          "password required",
+			"secretRequired": true,
+			"server":         item,
+		})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{
 			"error":  sshx.PublicError(err),
@@ -888,6 +927,11 @@ func (s *Server) downloadFile(w http.ResponseWriter, r *http.Request) {
 		disposition = "attachment"
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disposition, info.Name()))
+	// Remote files are untrusted: never let the browser sniff them or run script from them.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if !filesystem.PassiveMedia(mime) {
+		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'")
+	}
 
 	size := info.Size()
 	rangeHeader := r.Header.Get("Range")
@@ -1015,7 +1059,13 @@ func bodyOrQueryServerID(r *http.Request, bodyID string) (string, error) {
 	return id, nil
 }
 
+var errNotJSON = errors.New("content type must be application/json")
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, dest any) error {
+	// Requiring a JSON content type keeps cross-site "simple" requests (text/plain forms) out.
+	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
+		return errNotJSON
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	decoder := json.NewDecoder(r.Body)
 	return decoder.Decode(dest)
@@ -1050,7 +1100,7 @@ func writeError(w http.ResponseWriter, err error) {
 		code = http.StatusNotFound
 	case strings.Contains(msg, "permission denied"):
 		code = http.StatusForbidden
-	case strings.Contains(msg, "passphrase-protected"):
+	case strings.Contains(msg, "passphrase"):
 		code = http.StatusBadRequest
 	case strings.Contains(msg, "authenticate"),
 		strings.Contains(msg, "authentication"),

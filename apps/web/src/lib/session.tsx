@@ -6,14 +6,20 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { ApiError } from "@/src/lib/api/client";
+import {
+  SecretPromptDialog,
+  type SecretInput,
+} from "@/src/components/server-selection/SecretPromptDialog";
 import { type NewServerInput, type Server, type ServerStatus } from "@/src/lib/servers";
 import { isSampleServer, mergeSampleServers } from "@/src/lib/sample-servers";
 import { useWindowServerId } from "@/src/lib/window-server";
 import {
+  SECRET_REQUIRED_STATUS,
   connectServer as connectServerApi,
   createServer,
   deleteServer as deleteServerApi,
@@ -93,6 +99,7 @@ export function toSessionServer(info: ServerInfo): Server {
     authType: info.authType,
     iconId: info.iconId || "server",
     customIcon: info.customIcon === true,
+    credentialsSaved: info.credentialsSaved !== false,
     updatedAt: info.updatedAt,
     error: info.error,
     lastSeen: info.lastSeen,
@@ -112,6 +119,8 @@ function toWriteInput(input: NewServerInput) {
     authType: input.authType,
     password: input.password,
     privateKey: input.privateKey,
+    ...(input.passphrase ? { passphrase: input.passphrase } : {}),
+    ...(input.saveCredentials !== undefined ? { saveCredentials: input.saveCredentials } : {}),
     iconId: input.iconId,
     ...(input.iconImage !== undefined ? { iconImage: input.iconImage } : {}),
   };
@@ -123,6 +132,58 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
   const [loadingServers, setLoadingServers] = useState(true);
   const [serversError, setServersError] = useState<string | null>(null);
+  const [secretPrompt, setSecretPrompt] = useState<{
+    server: Server;
+    error: string | null;
+    resolve: (secret: SecretInput | null) => void;
+  } | null>(null);
+  const serversRef = useRef<Server[]>([]);
+  useEffect(() => {
+    serversRef.current = servers;
+  }, [servers]);
+
+  const askSecret = useCallback(
+    (id: string, error: string | null) =>
+      new Promise<SecretInput | null>((resolve) => {
+        const server = serversRef.current.find((item) => item.id === id);
+        if (!server) {
+          resolve(null);
+          return;
+        }
+        setSecretPrompt({
+          server,
+          error,
+          resolve: (secret) => {
+            setSecretPrompt(null);
+            resolve(secret);
+          },
+        });
+      }),
+    [],
+  );
+
+  /** Connects; for a server saved without credentials, asks for the password/key first. */
+  const connectWithSecret = useCallback(
+    async (id: string) => {
+      try {
+        return await connectServerApi(id);
+      } catch (err) {
+        if (!(err instanceof ApiError) || err.status !== SECRET_REQUIRED_STATUS) throw err;
+      }
+      let lastError: string | null = null;
+      for (;;) {
+        const secret = await askSecret(id, lastError);
+        if (!secret) throw new Error("Connection cancelled.");
+        try {
+          return await connectServerApi(id, secret);
+        } catch (err) {
+          if (!(err instanceof ApiError)) throw err;
+          lastError = err.message;
+        }
+      }
+    },
+    [askSecret],
+  );
 
   const refreshServers = useCallback(async () => {
     try {
@@ -252,7 +313,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       patchServer(id, { status: "connecting", error: undefined });
       const started = Date.now();
       try {
-        const info = await connectServerApi(id);
+        const info = await connectWithSecret(id);
         const next = {
           ...toSessionServer(info),
           connected: true,
@@ -268,7 +329,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [patchServer, refreshServers],
+    [connectWithSecret, patchServer, refreshServers],
   );
 
   const disconnectServer = useCallback(async (id: string) => {
@@ -428,7 +489,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+  return (
+    <SessionContext.Provider value={value}>
+      {children}
+      {secretPrompt ? (
+        <SecretPromptDialog
+          server={secretPrompt.server}
+          error={secretPrompt.error}
+          onSubmit={(secret) => secretPrompt.resolve(secret)}
+          onCancel={() => secretPrompt.resolve(null)}
+        />
+      ) : null}
+    </SessionContext.Provider>
+  );
 }
 
 export function useSession() {

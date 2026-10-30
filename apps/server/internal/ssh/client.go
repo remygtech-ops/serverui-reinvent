@@ -1,6 +1,7 @@
 package sshx
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net"
 	"time"
@@ -23,6 +24,23 @@ func Dial(cfg Config, auth AuthMethod) (*ssh.Client, error) {
 		User: cfg.Username,
 		Auth: []ssh.AuthMethod{auth.SSHAuthMethod()},
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			fingerprint := ssh.FingerprintSHA256(key)
+			pinned := cfg.PinnedHostKey
+			if cfg.PinLookup != nil {
+				if current := cfg.PinLookup(); current != "" {
+					pinned = current
+				}
+			}
+			if pinned == "" {
+				// First use: trust and report the key so the caller can pin it.
+				if cfg.OnHostKey != nil {
+					return cfg.OnHostKey(fingerprint)
+				}
+				return nil
+			}
+			if subtle.ConstantTimeCompare([]byte(fingerprint), []byte(pinned)) != 1 {
+				return fmt.Errorf("host key mismatch: the server presented %s but %s was trusted", fingerprint, pinned)
+			}
 			return nil
 		},
 		Timeout: 12 * time.Second,

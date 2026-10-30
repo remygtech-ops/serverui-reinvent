@@ -90,6 +90,8 @@ export function AddServerModal({
   const [auth, setAuth] = useState<AuthMethod>(server?.authType || "password");
   const [password, setPassword] = useState("");
   const [privateKey, setPrivateKey] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+  const [saveCredentials, setSaveCredentials] = useState(server?.credentialsSaved !== false);
   const [iconId, setIconId] = useState(server?.iconId || DEFAULT_SERVER_ICON);
   /** null keeps a saved custom image. "" removes it. A data URL is a new upload. */
   const [iconImage, setIconImage] = useState<string | null>(null);
@@ -103,7 +105,13 @@ export function AddServerModal({
   const testAbort = useRef<AbortController | null>(null);
 
   const values = { name, host: address, port, username, auth, password, privateKey };
-  const context = { editing, savedAuth: server?.authType };
+  const context = {
+    editing,
+    savedAuth: server?.authType,
+    saved: server
+      ? { host: server.address, port: server.sshPort || 22, username: server.username || "" }
+      : undefined,
+  };
   const errors = validateServerForm(values, context, "save");
   const visibleErrors: FieldErrors = {};
   for (const field of FIELD_ORDER) {
@@ -120,6 +128,7 @@ export function AddServerModal({
     auth,
     password,
     privateKey,
+    passphrase,
   ]);
   const visibleTest = test?.key === fieldsKey ? test : null;
   const testUi = TEST_UI[visibleTest?.status ?? "idle"];
@@ -190,6 +199,7 @@ export function AddServerModal({
           authType: auth,
           password: auth === "password" ? password.trim() || undefined : undefined,
           privateKey: auth === "private_key" ? privateKey.trim() || undefined : undefined,
+          passphrase: auth === "private_key" ? passphrase || undefined : undefined,
         },
         server?.id,
         { signal: controller.signal },
@@ -256,6 +266,8 @@ export function AddServerModal({
         authType: auth,
         password: password.trim() || undefined,
         privateKey: privateKey.trim() || undefined,
+        passphrase: auth === "private_key" ? passphrase || undefined : undefined,
+        saveCredentials,
         iconId,
         ...(iconImage !== null ? { iconImage } : {}),
       },
@@ -431,7 +443,7 @@ export function AddServerModal({
               label="Private Key"
               error={visibleErrors.secret}
               errorId={ids("secret").error}
-              hint="Your private key is encrypted before being stored. Passphrase-protected keys are not supported yet."
+              hint="Your private key is encrypted before being stored. If the key has a passphrase, enter it below."
             >
               <textarea
                 {...fieldProps("secret")}
@@ -448,6 +460,41 @@ export function AddServerModal({
               />
             </Field>
           )}
+
+          {auth === "private_key" ? (
+            <Field
+              className="col-span-2"
+              label="Key Passphrase (optional)"
+              errorId={`${fieldId}-passphrase-error`}
+            >
+              <input
+                type="password"
+                aria-label="Key passphrase"
+                value={passphrase}
+                onChange={(event) => setPassphrase(event.target.value)}
+                className="sui-server-input"
+                placeholder={editing ? "Leave unchanged" : "Only if the key is encrypted"}
+                autoComplete="new-password"
+              />
+            </Field>
+          ) : null}
+
+          <label className="col-span-2 flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={saveCredentials}
+              onChange={(event) => setSaveCredentials(event.target.checked)}
+              className="mt-0.5 size-4 shrink-0"
+            />
+            <span className="min-w-0 text-[13px] leading-5">
+              Remember {auth === "private_key" ? "private key" : "password"}
+              <span className="sui-finder-muted block text-[12px]">
+                {saveCredentials
+                  ? "Stored encrypted on this machine, so you can reconnect after closing ServerUI."
+                  : "Not stored. ServerUI asks for it each time it starts and keeps it in memory only."}
+              </span>
+            </span>
+          </label>
         </div>
       </div>
 

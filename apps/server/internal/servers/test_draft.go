@@ -11,6 +11,10 @@ import (
 // CodeSavedCredentialUnavailable means the saved secret could not be decrypted.
 const CodeSavedCredentialUnavailable = "saved_credential_unavailable"
 
+// CodeSecretRequiredForNewDestination means the host, port or username changed, so the saved
+// secret must not be reused and a new one has to be entered.
+const CodeSecretRequiredForNewDestination = "secret_required_for_new_destination"
+
 type DraftTestResult struct {
 	OK      bool   `json:"ok"`
 	Latency int64  `json:"latencyMs"`
@@ -23,12 +27,24 @@ func (s *Service) TestDraft(ctx context.Context, serverID string, input Input) (
 	input = Normalize(input)
 	var saved Record
 	useSaved := false
+	pinned := ""
 	if serverID != "" {
 		var err error
 		if saved, err = s.store.Get(ctx, serverID); err != nil {
 			return DraftTestResult{}, err
 		}
-		useSaved = input.Password == "" && input.PrivateKey == "" && input.AuthType == saved.AuthType
+		blank := input.Password == "" && input.PrivateKey == ""
+		if blank && input.AuthType == saved.AuthType && !sameDestination(saved, input) {
+			// A saved credential is only ever presented to the host it was saved for.
+			return DraftTestResult{
+				Code:  CodeSecretRequiredForNewDestination,
+				Error: "Enter the password or private key again to test a different host, port or username.",
+			}, nil
+		}
+		useSaved = blank && input.AuthType == saved.AuthType
+		if sameDestination(saved, input) {
+			pinned = saved.HostKey // a test of the saved destination also checks the pinned key
+		}
 	}
 	if err := ValidateConnection(input, !useSaved); err != nil {
 		return DraftTestResult{}, err
@@ -47,7 +63,7 @@ func (s *Service) TestDraft(ctx context.Context, serverID string, input Input) (
 		return failedDraft(err, 0), nil
 	}
 
-	cfg := sshx.Config{Host: input.Host, Port: input.Port, Username: input.Username}
+	cfg := sshx.Config{Host: input.Host, Port: input.Port, Username: input.Username, PinnedHostKey: pinned}
 	log.Printf("server.test_draft host=%s port=%d saved_credential=%t", cfg.Host, cfg.Port, useSaved)
 	start := time.Now()
 	err = s.dial(cfg, auth)
@@ -60,7 +76,7 @@ func (s *Service) TestDraft(ctx context.Context, serverID string, input Input) (
 
 func (in Input) secretValue() string {
 	if in.AuthType == AuthPrivateKey {
-		return in.PrivateKey
+		return packKey(in.PrivateKey, in.Passphrase)
 	}
 	return in.Password
 }
@@ -68,4 +84,31 @@ func (in Input) secretValue() string {
 func failedDraft(err error, latency int64) DraftTestResult {
 	code, message := sshx.ClassifyError(err)
 	return DraftTestResult{OK: false, Latency: latency, Code: code, Error: message}
+}
+
+// sameDestination reports whether the request targets the host, port and user the secret was saved for.
+func sameDestination(saved Record, input Input) bool {
+	return asciiEqualFold(saved.Host, input.Host) && saved.Port == input.Port && saved.Username == input.Username
+}
+
+// asciiEqualFold compares host names the way DNS does: ASCII letters ignore case, everything else
+// must match exactly. strings.EqualFold also folds Unicode (the Kelvin sign equals "k"), which
+// would let a look-alike host count as the original destination.
+func asciiEqualFold(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		x, y := a[i], b[i]
+		if 'A' <= x && x <= 'Z' {
+			x += 'a' - 'A'
+		}
+		if 'A' <= y && y <= 'Z' {
+			y += 'a' - 'A'
+		}
+		if x != y {
+			return false
+		}
+	}
+	return true
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useServerGroups } from "@/src/lib/server-groups";
 import {
   Copy,
   Globe,
@@ -65,6 +66,8 @@ export function ServerManager({ actions }: { actions: ServerWindowActions }) {
   const titlebar = useTitlebarProps();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("name");
+  const [groupFilter, setGroupFilter] = useState("");
+  const { groups, names: groupNames, setGroup } = useServerGroups();
   const [view, setView] = useState<ViewMode>("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<DetailTab>("general");
@@ -87,18 +90,23 @@ export function ServerManager({ actions }: { actions: ServerWindowActions }) {
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const filtered = servers.filter((server) => {
+      if (groupFilter && (groups[server.id] ?? "") !== groupFilter) return false;
       if (!needle) return true;
       const host = `${server.username || ""}@${server.address} ${server.address} ${server.name}`;
       return host.toLowerCase().includes(needle);
     });
     return [...filtered].sort((a, b) => {
+      // Grouped servers come first, by group name; ungrouped ones follow.
+      const ga = groups[a.id] ?? "";
+      const gb = groups[b.id] ?? "";
+      if (ga !== gb) return ga === "" ? 1 : gb === "" ? -1 : ga.localeCompare(gb);
       if (sort === "status") {
         const rank = STATUS_RANK[connectionStatus(a)] - STATUS_RANK[connectionStatus(b)];
         if (rank !== 0) return rank;
       }
       return a.name.localeCompare(b.name);
     });
-  }, [query, servers, sort]);
+  }, [groupFilter, groups, query, servers, sort]);
 
   const selected = visible.find((server) => server.id === selectedId) ?? visible[0] ?? null;
   const selectedStatus = selected ? connectionStatus(selected) : "offline";
@@ -319,6 +327,26 @@ export function ServerManager({ actions }: { actions: ServerWindowActions }) {
               </ViewButton>
             </div>
           </div>
+          {groupNames.length > 0 ? (
+            <div className="mt-2">
+              <label className="sr-only" htmlFor="server-group-filter">
+                Filter by group
+              </label>
+              <select
+                id="server-group-filter"
+                value={groupFilter}
+                onChange={(event) => setGroupFilter(event.target.value)}
+                className="sui-finder-control h-[28px] w-full rounded-[8px] px-2 text-[12px] outline-none"
+              >
+                <option value="">All groups</option>
+                {groupNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto px-2 pb-2" role="listbox" aria-label="Servers">
@@ -378,20 +406,31 @@ export function ServerManager({ actions }: { actions: ServerWindowActions }) {
                 </div>
               </li>
             ) : null}
-            {visible.map((server, index) => (
-              <li
-                key={server.id}
-                className="animate-pane-in"
-                style={{ animationDelay: `${Math.min(index, 8) * 24}ms` }}
-              >
-                <ServerRow
-                  server={server}
-                  selected={!adding && !editing && selected?.id === server.id}
-                  onSelect={() => selectServer(server.id)}
-                  onMenu={(anchor) => openMenu(server, anchor)}
-                />
-              </li>
-            ))}
+            {visible.map((server, index) => {
+              const group = groups[server.id] ?? "";
+              const previous = index > 0 ? (groups[visible[index - 1].id] ?? "") : null;
+              const heading =
+                groupNames.length > 0 && group !== previous ? group || "Ungrouped" : null;
+              return (
+                <li
+                  key={server.id}
+                  className="animate-pane-in"
+                  style={{ animationDelay: `${Math.min(index, 8) * 24}ms` }}
+                >
+                  {heading ? (
+                    <p className="sui-finder-muted px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em]">
+                      {heading}
+                    </p>
+                  ) : null}
+                  <ServerRow
+                    server={server}
+                    selected={!adding && !editing && selected?.id === server.id}
+                    onSelect={() => selectServer(server.id)}
+                    onMenu={(anchor) => openMenu(server, anchor)}
+                  />
+                </li>
+              );
+            })}
           </ul>
         </div>
 
@@ -523,45 +562,69 @@ export function ServerManager({ actions }: { actions: ServerWindowActions }) {
 
               <div className="mt-4">
                 {tab === "general" ? (
-                  <div className="overflow-hidden rounded-[10px] border border-[var(--finder-hairline)] bg-[color-mix(in_srgb,var(--finder-toolbar)_86%,transparent)]">
-                    <Field
-                      icon={<User className="size-4" />}
-                      label="Server Name"
-                      value={selected.name}
-                    />
-                    <Field
-                      icon={<Globe className="size-4" />}
-                      label="Host / IP"
-                      value={selected.address}
-                      action={
-                        <button
-                          type="button"
-                          aria-label="Copy host"
-                          onClick={() => void copyHost(selected.address)}
-                          className="sui-finder-plain-button rounded-[6px] p-1.5"
-                        >
-                          <Copy className="size-3.5" />
-                          <span className="sr-only">{copied ? "Copied" : "Copy"}</span>
-                        </button>
-                      }
-                    />
-                    <Field
-                      label="SSH Port"
-                      value={String(selected.sshPort || 22)}
-                      icon={<Wifi className="size-4" />}
-                    />
-                    <Field
-                      icon={<User className="size-4" />}
-                      label="Username"
-                      value={selected.username || "—"}
-                    />
-                    <Field
-                      icon={<KeyRound className="size-4" />}
-                      label="Authentication"
-                      value={authLabel(selected.authType)}
-                      last
-                    />
-                  </div>
+                  <>
+                    <div className="overflow-hidden rounded-[10px] border border-[var(--finder-hairline)] bg-[color-mix(in_srgb,var(--finder-toolbar)_86%,transparent)]">
+                      <Field
+                        icon={<User className="size-4" />}
+                        label="Server Name"
+                        value={selected.name}
+                      />
+                      <Field
+                        icon={<Globe className="size-4" />}
+                        label="Host / IP"
+                        value={selected.address}
+                        action={
+                          <button
+                            type="button"
+                            aria-label="Copy host"
+                            onClick={() => void copyHost(selected.address)}
+                            className="sui-finder-plain-button rounded-[6px] p-1.5"
+                          >
+                            <Copy className="size-3.5" />
+                            <span className="sr-only">{copied ? "Copied" : "Copy"}</span>
+                          </button>
+                        }
+                      />
+                      <Field
+                        label="SSH Port"
+                        value={String(selected.sshPort || 22)}
+                        icon={<Wifi className="size-4" />}
+                      />
+                      <Field
+                        icon={<User className="size-4" />}
+                        label="Username"
+                        value={selected.username || "—"}
+                      />
+                      <Field
+                        icon={<KeyRound className="size-4" />}
+                        label="Authentication"
+                        value={authLabel(selected.authType)}
+                        last
+                      />
+                    </div>
+                    <div className="mt-3 flex items-center gap-3">
+                      <label htmlFor="server-group" className="sui-finder-muted w-24 text-[12px]">
+                        Group
+                      </label>
+                      <input
+                        id="server-group"
+                        key={selected.id}
+                        list="server-group-names"
+                        defaultValue={groups[selected.id] ?? ""}
+                        onBlur={(event) => setGroup(selected.id, event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") event.currentTarget.blur();
+                        }}
+                        placeholder="No group"
+                        className="sui-finder-search h-[28px] w-56 rounded-[8px] px-2.5 text-[12px] outline-none"
+                      />
+                      <datalist id="server-group-names">
+                        {groupNames.map((name) => (
+                          <option key={name} value={name} />
+                        ))}
+                      </datalist>
+                    </div>
+                  </>
                 ) : (
                   <div className="rounded-[10px] border border-[var(--finder-hairline)] bg-[color-mix(in_srgb,var(--finder-toolbar)_86%,transparent)] px-4 py-4">
                     <p className="text-[13px]">

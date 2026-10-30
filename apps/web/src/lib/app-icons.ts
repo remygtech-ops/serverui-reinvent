@@ -3,12 +3,14 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Boxes,
+  Braces,
   Code2,
   Database,
   Eye,
   Folder,
   Globe,
   Info,
+  KeyRound,
   LayoutDashboard,
   Server,
   Settings,
@@ -25,6 +27,8 @@ export const APP_ICONS: Record<AppId, LucideIcon> = {
   applications: Boxes,
   domains: Globe,
   databases: Database,
+  snippets: Braces,
+  keykey: KeyRound,
   settings: Settings,
   about: Info,
   viewer: Eye,

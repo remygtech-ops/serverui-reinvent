@@ -7,6 +7,8 @@ export const APP_IDS = [
   "applications",
   "domains",
   "databases",
+  "snippets",
+  "keykey",
   "settings",
 ] as const;
 
@@ -94,6 +96,20 @@ export const APP_META: Record<
     width: 950,
     height: 600,
     available: false,
+    chrome: "light",
+  },
+  snippets: {
+    title: "Snippets",
+    width: 820,
+    height: 540,
+    available: true,
+    chrome: "light",
+  },
+  keykey: {
+    title: "KeyKey",
+    width: 820,
+    height: 540,
+    available: true,
     chrome: "light",
   },
   settings: {

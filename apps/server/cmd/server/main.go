@@ -21,6 +21,9 @@ import (
 )
 
 func main() {
+	if err := api.ValidateAuthConfig(); err != nil {
+		log.Fatal(err)
+	}
 	addr := api.ListenAddr()
 	vault := secrets.EnvVault{}
 	rawKey, err := vault.EncryptionKey()

@@ -23,8 +23,8 @@ func New(pool *sshx.Pool) *Handler {
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		// Auth is enforced by the API middleware before Upgrade.
-		// Origin allowlisting for desktop also happens there via CORS.
+		// The API middleware (api.Handler) already rejected any request whose Origin is not
+		// allowed, and enforces the local token, before the upgrade reaches this handler.
 		return true
 	},
 	ReadBufferSize:  4096,

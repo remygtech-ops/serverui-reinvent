@@ -49,3 +49,22 @@ func TestInline(t *testing.T) {
 		t.Fatal("archives should download")
 	}
 }
+
+func TestActiveContentIsNeverInline(t *testing.T) {
+	for _, m := range []string{"text/html", "image/svg+xml", "application/xml", "text/xml", "text/javascript", "application/xhtml+xml", "text/css"} {
+		if Inline(m) {
+			t.Fatalf("%s must not be shown inline from the API origin", m)
+		}
+		if PassiveMedia(m) {
+			t.Fatalf("%s is not passive media", m)
+		}
+	}
+	for _, m := range []string{"text/plain", "application/json", "image/png", "video/mp4", "application/pdf"} {
+		if !Inline(m) {
+			t.Fatalf("%s should stay inline", m)
+		}
+	}
+	if !PassiveMedia("image/png") || !PassiveMedia("application/pdf") || PassiveMedia("text/plain") {
+		t.Fatal("passive media classification")
+	}
+}

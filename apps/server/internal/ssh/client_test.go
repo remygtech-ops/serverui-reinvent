@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -236,4 +237,71 @@ func splitAddr(t *testing.T, addr string) (string, int) {
 
 func rsaPKCS1(key *rsa.PrivateKey) []byte {
 	return x509.MarshalPKCS1PrivateKey(key)
+}
+
+func TestDialPinsTheHostKeyOnFirstUseAndRefusesAChange(t *testing.T) {
+	addr := startTestSSHServer(t, "alice", "pw", nil)
+	host, port := splitAddr(t, addr)
+	var pinned string
+	cfg := Config{Host: host, Port: port, Username: "alice", OnHostKey: func(fp string) error { pinned = fp; return nil }}
+	client, err := Dial(cfg, PasswordAuth{Password: "pw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = client.Close()
+	if !strings.HasPrefix(pinned, "SHA256:") {
+		t.Fatalf("first use should report a fingerprint, got %q", pinned)
+	}
+
+	// The same key stays trusted.
+	cfg = Config{Host: host, Port: port, Username: "alice", PinnedHostKey: pinned}
+	client, err = Dial(cfg, PasswordAuth{Password: "pw"})
+	if err != nil {
+		t.Fatalf("pinned key should be accepted: %v", err)
+	}
+	_ = client.Close()
+
+	// Another key, as a man in the middle would present, is refused before authentication.
+	cfg.PinnedHostKey = "SHA256:someOtherKeyFingerprintThatDoesNotMatch"
+	if _, err = Dial(cfg, PasswordAuth{Password: "pw"}); err == nil {
+		t.Fatal("a changed host key must be refused")
+	}
+	if code, _ := ClassifyError(err); code != CodeHostKeyChanged {
+		t.Fatalf("code %q for %v", code, err)
+	}
+}
+
+func TestManagerEnforcesAPinRecordedAfterItWasCreated(t *testing.T) {
+	addr := startTestSSHServer(t, "alice", "pw", nil)
+	host, port := splitAddr(t, addr)
+	var stored string // stands in for the servers table
+	cfg := Config{
+		Host: host, Port: port, Username: "alice",
+		PinLookup: func() string { return stored },
+		OnHostKey: func(fp string) error {
+			if stored == "" {
+				stored = fp
+			}
+			return nil
+		},
+	}
+	mgr := NewManager(cfg, PasswordAuth{Password: "pw"})
+	client, err := mgr.Ensure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored == "" {
+		t.Fatal("first connection should pin the key")
+	}
+	// The connection drops, then the peer presents a different key than the pinned one.
+	pinned := stored
+	stored = "SHA256:aDifferentKeyThanTheOneTrustedAtFirstUse"
+	_ = client.Close()
+	for i := 0; i < 50 && func() bool { st, _ := mgr.Status(); return st == StatusOnline }(); i++ {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := mgr.Ensure(); err == nil {
+		t.Fatal("a reconnect must enforce the pin that is stored now, not the one seen at creation")
+	}
+	_ = pinned
 }

@@ -1,6 +1,7 @@
 package sshx
 
 import (
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"strings"
@@ -41,10 +42,13 @@ func ParsePrivateKeyAuth(pemBytes, passphrase string) (AuthMethod, error) {
 	var missing *ssh.PassphraseMissingError
 	if errors.As(err, &missing) || strings.Contains(strings.ToLower(err.Error()), "passphrase") {
 		if strings.TrimSpace(passphrase) == "" {
-			return nil, fmt.Errorf("passphrase-protected private keys are not supported yet")
+			return nil, fmt.Errorf("this private key requires a passphrase")
 		}
 		signer, err = ssh.ParsePrivateKeyWithPassphrase(raw, []byte(passphrase))
 		if err != nil {
+			if errors.Is(err, x509.IncorrectPasswordError) {
+				return nil, fmt.Errorf("incorrect passphrase for this private key")
+			}
 			return nil, fmt.Errorf("invalid private key")
 		}
 		return PublicKeyAuth{signer: signer}, nil

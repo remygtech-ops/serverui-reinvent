@@ -89,7 +89,7 @@ impl BackendManager {
                     .ok()
                     .filter(|v| !v.trim().is_empty())
             });
-        let encryption_key = crate::keyvault::resolve_encryption_key(env_key.as_deref())?;
+        let encryption_key = crate::keyvault::resolve_encryption_key(env_key.as_deref(), data_dir)?;
 
         let mut cmd = Command::new(&binary);
         cmd.stdin(Stdio::null())

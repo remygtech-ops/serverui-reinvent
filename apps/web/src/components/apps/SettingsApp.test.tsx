@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { AppLockProvider } from "@/src/lib/app-lock";
 import { WallpaperProvider } from "@/src/lib/wallpaper";
 import { SettingsApp } from "./SettingsApp";
 
@@ -30,6 +31,46 @@ describe("SettingsApp", () => {
     expect(screen.queryByRole("button", { name: /Check for updates/i })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("option", { name: "Valley" }));
     expect(screen.getByRole("option", { name: "Valley" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("changes the terminal theme and size from the Terminal tab", async () => {
+    render(
+      <WallpaperProvider>
+        <SettingsApp />
+      </WallpaperProvider>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Terminal" }));
+    expect(screen.getByRole("button", { name: "Terminal" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("option", { name: "Dracula" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("option", { name: "Dracula" }));
+    expect(screen.getByRole("option", { name: "Dracula" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByTestId("terminal-preview")).toHaveStyle({ fontSize: "13px" });
+    await userEvent.click(screen.getByRole("button", { name: "Larger text" }));
+    expect(screen.getByTestId("terminal-preview")).toHaveStyle({ fontSize: "14px" });
+    localStorage.removeItem("serverui-terminal");
+  });
+
+  it("switches the password vault to a Bitwarden instance in Security", async () => {
+    render(
+      <AppLockProvider>
+        <WallpaperProvider>
+          <SettingsApp />
+        </WallpaperProvider>
+      </AppLockProvider>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Security" }));
+    expect(screen.getByRole("radio", { name: "KeyKey (built in)" })).toBeChecked();
+    await userEvent.click(screen.getByRole("radio", { name: "Bitwarden instance" }));
+    expect(screen.getByLabelText("Bitwarden CLI address")).toHaveValue("http://localhost:8087");
+    await userEvent.click(screen.getByRole("radio", { name: "15 min" }));
+    expect(screen.getByRole("radio", { name: "15 min" })).toBeChecked();
+    localStorage.removeItem("serverui-security");
   });
 
   it("swaps the built-in scenes for the light set", () => {

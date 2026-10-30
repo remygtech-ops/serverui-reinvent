@@ -462,6 +462,43 @@ export function EditorMacIcon({ className }: MacIconProps) {
   );
 }
 
+/** KeyKey: teal plate with a key. */
+export function KeyKeyMacIcon({ className }: MacIconProps) {
+  return (
+    <MacIconPlate className={className} from="#35D3B0" to="#0B8F7A">
+      <g fill="none" stroke="#fff" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="46" cy="64" r="20" />
+        <path d="M66 64h42" />
+        <path d="M92 64v14" />
+        <path d="M104 64v10" />
+      </g>
+      <circle cx="46" cy="64" r="6" fill="#fff" />
+    </MacIconPlate>
+  );
+}
+
+/** Snippets: violet plate with a command line and a bracket pair. */
+export function SnippetsMacIcon({ className }: MacIconProps) {
+  return (
+    <MacIconPlate className={className} from="#8B7CFF" to="#4B3FD1">
+      <g fill="none" stroke="#fff" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M46 40 22 64l24 24" />
+        <path d="M82 40l24 24-24 24" />
+      </g>
+      <rect
+        x="55"
+        y="38"
+        width="18"
+        height="52"
+        rx="9"
+        transform="rotate(18 64 64)"
+        fill="#fff"
+        opacity="0.92"
+      />
+    </MacIconPlate>
+  );
+}
+
 /** Info: dark frosted plate + white circled i that lifts on hover. */
 export function InfoMacIcon({ className }: MacIconProps) {
   return (
