@@ -53,6 +53,20 @@ pub fn run() {
                     dirs_fallback_app_data()
                 });
 
+            // Windows only: small purple badge on the taskbar button (not on the window icon).
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                apply_taskbar_badge(&window);
+                let badge_window = window.clone();
+                window.on_window_event(move |event| {
+                    // Re-apply when the window regains focus, in case the taskbar button
+                    // was not ready yet at start-up or was recreated by Explorer.
+                    if let tauri::WindowEvent::Focused(true) = event {
+                        apply_taskbar_badge(&badge_window);
+                    }
+                });
+            }
+
             let mgr = Arc::clone(&manager_for_setup);
             std::thread::spawn(move || {
                 if let Err(_err) = mgr.start(&app_dir, &data_dir) {
@@ -72,6 +86,15 @@ pub fn run() {
                 _ => {}
             }
         });
+}
+
+/// Purple overlay icon on the Windows taskbar button. Other platforms have no taskbar overlay.
+#[cfg(target_os = "windows")]
+fn apply_taskbar_badge(window: &tauri::WebviewWindow) {
+    const BADGE: &[u8] = include_bytes!("../icons/badge-purple.png");
+    if let Ok(badge) = tauri::image::Image::from_bytes(BADGE) {
+        let _ = window.set_overlay_icon(Some(badge));
+    }
 }
 
 fn dirs_fallback_app_data() -> PathBuf {
