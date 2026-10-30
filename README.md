@@ -79,6 +79,20 @@ Working in this repository:
 - Linux-inspired desktop with a dock, window manager, wallpapers, folder
   shortcuts, and macOS or Aura themes
 - AES-256-GCM encryption for stored credentials
+- **Remember or forget passwords:** a per-server "Remember password" option. Off means the
+  password lives in memory only and is asked when you connect. Desktop keeps a stable
+  encryption key (OS keychain, or a `0600` key file) so saved passwords survive restarts
+- **Passphrase-protected SSH keys**, stored encrypted together with the key
+- **Terminal customization:** Ctrl +/-/0 and Ctrl + wheel zoom, ten color themes, font and
+  cursor options with a live preview in Settings → Terminal, prompt highlighting done in the
+  UI (nothing is added to the server's shell), search (Ctrl+Shift+F), copy on select,
+  right-click paste, automatic reconnect
+- **Snippets app:** saved shell commands in groups; insert or run them in the open terminal
+- **KeyKey password vault:** encrypted in the browser (AES-256-GCM, PBKDF2 master password),
+  generator, clipboard auto-clear, auto-lock. Settings → Security can switch it to a Bitwarden
+  or Vaultwarden instance (read-only, through the local `bw serve` API)
+- **App lock:** optional PIN or passphrase screen lock with an idle timeout
+- **Server groups** in the sidebar, and **syntax highlighting** in the text editor
 
 Not implemented yet (UI may show Coming Soon):
 
