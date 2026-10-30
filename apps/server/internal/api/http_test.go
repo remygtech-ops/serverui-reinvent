@@ -328,6 +328,16 @@ func TestWebModeRefusesRebindingHosts(t *testing.T) {
 	if got := do(http.MethodGet, "server:8080", "", "localhost, rebind.evil.example:3000"); got != http.StatusForbidden {
 		t.Fatalf("forged forwarded host: status %d", got)
 	}
+	// A second X-Forwarded-Host header line is checked too.
+	multi := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	multi.Host = "server:8080"
+	multi.Header.Add("X-Forwarded-Host", "localhost:3000")
+	multi.Header.Add("X-Forwarded-Host", "rebind.evil.example")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, multi)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("second forwarded host line: status %d", rec.Code)
+	}
 	// Legitimate names still work, including the Next proxy case.
 	for _, c := range []struct{ host, origin, xfh string }{
 		{"localhost:8080", "", ""},

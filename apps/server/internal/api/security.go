@@ -197,9 +197,12 @@ func webHostAllowed(r *http.Request) bool {
 	if !allowed[strings.ToLower(hostnameOf(r.Host))] {
 		return false
 	}
-	for _, v := range strings.Split(r.Header.Get("X-Forwarded-Host"), ",") {
-		if v = strings.TrimSpace(v); v != "" && !allowed[strings.ToLower(hostnameOf(v))] {
-			return false
+	// Every header line and every comma-separated value counts, not just the first one.
+	for _, line := range r.Header.Values("X-Forwarded-Host") {
+		for _, v := range strings.Split(line, ",") {
+			if v = strings.TrimSpace(v); v != "" && !allowed[strings.ToLower(hostnameOf(v))] {
+				return false
+			}
 		}
 	}
 	return true
