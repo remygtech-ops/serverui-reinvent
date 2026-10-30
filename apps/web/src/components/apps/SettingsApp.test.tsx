@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { AppLockProvider } from "@/src/lib/app-lock";
 import { WallpaperProvider } from "@/src/lib/wallpaper";
 import { SettingsApp } from "./SettingsApp";
 
@@ -57,9 +58,11 @@ describe("SettingsApp", () => {
 
   it("switches the password vault to a Bitwarden instance in Security", async () => {
     render(
-      <WallpaperProvider>
-        <SettingsApp />
-      </WallpaperProvider>,
+      <AppLockProvider>
+        <WallpaperProvider>
+          <SettingsApp />
+        </WallpaperProvider>
+      </AppLockProvider>,
     );
     await userEvent.click(screen.getByRole("button", { name: "Security" }));
     expect(screen.getByRole("radio", { name: "KeyKey (built in)" })).toBeChecked();
