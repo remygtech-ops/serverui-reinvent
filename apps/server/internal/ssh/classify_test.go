@@ -17,9 +17,10 @@ func TestClassifyError(t *testing.T) {
 		"ssh: overflow reading version string":                                                                               CodeNotSSH,
 		"ssh: handshake failed: ssh: unable to authenticate, attempted methods [none password], no supported methods remain": CodeAuthFailed,
 		"ssh: handshake failed: read tcp 1.2.3.4:5->6.7.8.9:22: i/o timeout":                                                 CodeTimeout,
-		"invalid private key": CodeInvalidPrivateKey,
-		"passphrase-protected private keys are not supported yet": CodePassphraseRequired,
-		"something unexpected": CodeSSHFailed,
+		"invalid private key":                       CodeInvalidPrivateKey,
+		"this private key requires a passphrase":    CodePassphraseRequired,
+		"incorrect passphrase for this private key": CodePassphraseRequired,
+		"something unexpected":                      CodeSSHFailed,
 	}
 	for raw, want := range cases {
 		code, message := ClassifyError(errors.New(raw))

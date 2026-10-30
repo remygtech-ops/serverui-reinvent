@@ -49,6 +49,8 @@ export type NewServerInput = {
   authType: "password" | "private_key";
   password?: string;
   privateKey?: string;
+  /** Unlocks an encrypted private key. */
+  passphrase?: string;
   /** Store the password/key encrypted. Defaults to true. */
   saveCredentials?: boolean;
   iconId?: string;

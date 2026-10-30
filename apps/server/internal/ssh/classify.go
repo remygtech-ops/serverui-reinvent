@@ -25,7 +25,7 @@ func ClassifyError(err error) (code, message string) {
 	switch {
 	// Auth failures also contain "handshake failed", so match them first.
 	case strings.Contains(msg, "passphrase"):
-		return CodePassphraseRequired, "This private key is protected by a passphrase. Passphrase-protected keys are not supported yet."
+		return CodePassphraseRequired, "This private key is protected by a passphrase. Enter the correct passphrase to use it."
 	case strings.Contains(msg, "invalid private key"),
 		strings.Contains(msg, "no key found"),
 		strings.Contains(msg, "private key is required"):
@@ -66,7 +66,7 @@ func PublicError(err error) string {
 	}
 	switch code, _ := ClassifyError(err); code {
 	case CodePassphraseRequired:
-		return "passphrase-protected private keys are not supported yet"
+		return "passphrase required or incorrect"
 	case CodeInvalidPrivateKey:
 		return "invalid private key"
 	case CodeAuthFailed:

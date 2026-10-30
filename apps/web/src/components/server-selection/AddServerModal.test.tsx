@@ -75,6 +75,27 @@ describe("AddServerModal", () => {
     );
   });
 
+  it("sends the passphrase of an encrypted private key", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(<AddServerModal onClose={() => undefined} onSubmit={onSubmit} />);
+
+    await user.type(screen.getByLabelText("Server Name"), "Edge Lab");
+    await user.type(screen.getByLabelText("Host / IP"), "203.0.113.10");
+    await user.type(screen.getByLabelText("Username"), "deploy");
+    await user.click(screen.getByRole("button", { name: "SSH Private Key" }));
+    await user.click(screen.getByPlaceholderText(/BEGIN OPENSSH PRIVATE KEY/));
+    await user.paste("-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----");
+    await user.type(screen.getByLabelText("Key passphrase"), "correct horse");
+    await user.click(screen.getByRole("button", { name: "Save Server" }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ authType: "private_key", passphrase: "correct horse" }),
+      { connect: false },
+    );
+  });
+
   it("can skip storing the password", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn().mockResolvedValue(undefined);

@@ -38,8 +38,9 @@ describe("SecretPromptDialog", () => {
     );
     expect(screen.getByRole("alert")).toHaveTextContent("unable to authenticate");
     await userEvent.type(screen.getByLabelText("Private key"), "KEY");
+    await userEvent.type(screen.getByLabelText("Key passphrase"), "pw");
     await userEvent.click(screen.getByRole("button", { name: "Connect" }));
-    expect(onSubmit).toHaveBeenCalledWith({ privateKey: "KEY" });
+    expect(onSubmit).toHaveBeenCalledWith({ privateKey: "KEY", passphrase: "pw" });
   });
 
   it("cancels with Escape", async () => {
