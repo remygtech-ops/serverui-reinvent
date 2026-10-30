@@ -1,161 +1,200 @@
-# ServerUI
+# ServerUI (fork `serverui-reinvent`)
 
-ServerUI is a modern, open-source control panel for managing your servers from a browser
-or the native desktop app.
+> 🔀 **Ce dépôt est un fork modifié de [rakhechashubham/serverui](https://github.com/rakhechashubham/serverui),
+> réalisé par [remygtech-ops](https://github.com/remygtech-ops).**
+> Le projet original appartient à son auteur (licence Apache 2.0, voir [LICENSE](LICENSE)).
+> Ce fork ajoute des fonctionnalités, un audit de sécurité avec ses correctifs et un
+> installeur Windows amélioré. Les ajouts sont détaillés dans
+> [Ce que ce fork change](#ce-que-ce-fork-change).
 
-It presents a Linux-inspired desktop UI. You add SSH servers, connect as many as
-you like at once, and use Files, Terminal, and System Monitor across all of them
-from one desktop. Nothing is installed on your servers: the UI never opens SSH, and
-a Go backend stores encrypted credentials and dials each host over plain SSH.
+ServerUI est un panneau de contrôle moderne et open source pour gérer vos serveurs depuis
+un navigateur ou l'application de bureau native.
 
-![ServerUI desktop: Files on web-01 with the server menu showing four connected servers](docs/images/desktop.jpg)
+Il propose une interface de bureau inspirée de Linux. Vous ajoutez des serveurs SSH, vous
+vous connectez à autant de serveurs que vous voulez en même temps, et vous utilisez Fichiers,
+Terminal et Moniteur système sur tous depuis un seul bureau. Rien n'est installé sur vos
+serveurs : l'interface n'ouvre jamais de connexion SSH, c'est un backend Go qui stocke les
+identifiants chiffrés et se connecte à chaque hôte en SSH classique.
+
+![Bureau ServerUI : Fichiers sur web-01 avec le menu serveurs montrant quatre serveurs connectés](docs/images/desktop.jpg)
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/images/system-monitor.jpg" alt="System Monitor showing live metrics for four servers"><br><sub><b>System Monitor</b>: every connected server, live.</sub></td>
-    <td width="50%"><img src="docs/images/copy-between-servers.jpg" alt="Files after copying a folder from web-01 to backup-01"><br><sub><b>Copy between servers</b>: drag a folder onto another server in the sidebar.</sub></td>
+    <td width="50%"><img src="docs/images/system-monitor.jpg" alt="Moniteur système avec les métriques en direct de quatre serveurs"><br><sub><b>Moniteur système</b> : tous les serveurs connectés, en direct.</sub></td>
+    <td width="50%"><img src="docs/images/copy-between-servers.jpg" alt="Fichiers après la copie d'un dossier de web-01 vers backup-01"><br><sub><b>Copie entre serveurs</b> : glissez un dossier sur un autre serveur dans la barre latérale.</sub></td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/images/terminal-tabs.jpg" alt="Terminal opened in the copied folder on backup-01, with a second tab on web-01"><br><sub><b>Terminal</b>: open it from any folder, with a tab per server.</sub></td>
+    <td colspan="2"><img src="docs/images/terminal-tabs.jpg" alt="Terminal ouvert dans le dossier copié sur backup-01, avec un second onglet sur web-01"><br><sub><b>Terminal</b> : ouvrez-le depuis n'importe quel dossier, avec un onglet par serveur.</sub></td>
   </tr>
 </table>
 
-## Download
+## Téléchargement
 
-**Latest release: [ServerUI 0.3.0](https://github.com/rakhechashubham/serverui/releases/tag/v0.3.0).**
-No need to build from source.
+**Installeur Windows (x64) de ce fork :**
+[page des Releases](https://github.com/remygtech-ops/serverui-reinvent/releases/latest)
+→ téléchargez `ServerUI-<version>-x64-setup.exe`.
 
-| Platform              | Installer                                                                                                                                                                                                                                |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| macOS (Apple Silicon) | [ServerUI-0.3.0-arm64.dmg](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-arm64.dmg)                                                                                                                |
-| macOS (Intel)         | [ServerUI-0.3.0-x64.dmg](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-x64.dmg)                                                                                                                    |
-| Windows x64           | [ServerUI-0.3.0-x64-setup.exe](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-x64-setup.exe) or [.msi](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-x64.msi) |
-| Linux x64             | [AppImage](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-x86_64.AppImage) or [.deb](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-amd64.deb)                 |
+L'installeur n'est **pas signé** (pas de certificat de signature de code) : Windows SmartScreen
+peut afficher un avertissement au premier lancement. Cliquez sur **Informations complémentaires**
+puis **Exécuter quand même**. Vérifiez l'intégrité avec le fichier `SHA256SUMS` de la release
+(`certutil -hashfile <fichier> SHA256`).
 
-Verify downloads with the release's
-[SHA256SUMS](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/SHA256SUMS)
-(`shasum -a 256 -c SHA256SUMS --ignore-missing`). The macOS builds are not
-notarized yet, so on first launch right-click the app and choose **Open**.
-See [docs/releases.md](docs/releases.md).
+L'installeur s'installe par utilisateur (pas besoin des droits administrateur), crée un dossier
+dans le menu Démarrer, et propose le français ou l'anglais. Sur Windows, l'icône de la barre des
+tâches porte une petite **pastille violette** qui distingue cette version.
 
-### What's new in 0.3.0
+Les builds macOS et Linux de l'application d'origine restent disponibles sur la
+[page des releases du projet original](https://github.com/rakhechashubham/serverui/releases).
+Voir [docs/releases.md](docs/releases.md).
 
-- **Every server on one desktop:** keep several servers connected at once, with
-  their status in the top bar.
-- **System Monitor for the whole fleet:** live CPU, memory, disk, and network for
-  every connected server, plus a comparison table. The process list now shows
-  the busiest processes first.
-- **Copy between servers:** drag a folder from one server onto another in Files.
-- **Terminal tabs:** one tab per server, and Open Terminal from any folder.
-- A plain text editor for remote files, desktop folder shortcuts, the Aura theme,
-  and Microsoft Store packaging.
+## Ce que ce fork change
 
-Full notes: [v0.3.0 release](https://github.com/rakhechashubham/serverui/releases/tag/v0.3.0).
+Toutes les nouveautés reprennent le style visuel de ServerUI et fonctionnent sous Linux et Windows.
 
-## Features
+### Fonctionnalités ajoutées
 
-Working in this repository:
+| Domaine              | Nouveauté                                                                                                                                                                                                                                                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🔑 Mots de passe SSH | Case **« Se souvenir du mot de passe »** par serveur : mot de passe chiffré (AES-256-GCM) et conservé après la fermeture. Décochée, il reste en mémoire seulement. Sur le bureau, la clé de chiffrement est stable (trousseau du système, sinon fichier `0600`)                                                                   |
+| 🔐 Clés SSH          | Prise en charge des clés privées **protégées par une passphrase**                                                                                                                                                                                                                                                                 |
+| 🖥️ Terminal          | Zoom (Ctrl +/-/0, Ctrl + molette), **dix thèmes** appliqués au terminal seul, police et curseur réglables avec **aperçu en direct** dans Paramètres → Terminal, recherche (Ctrl+Maj+F), copie à la sélection, collage au clic droit, **reconnexion automatique**                                                                  |
+| 🎨 Invite colorée    | Coloration de la ligne d'invite (`user@hôte:~/...`) faite **dans l'interface** : rien n'est ajouté au shell du serveur                                                                                                                                                                                                            |
+| 🗝️ KeyKey            | **Coffre de mots de passe intégré**, chiffré dans le navigateur (AES-256-GCM, mot de passe maître PBKDF2), générateur, effacement automatique du presse-papiers, verrouillage automatique. Paramètres → Sécurité permet de le remplacer par une instance **Bitwarden / Vaultwarden** (lecture seule, via l'API locale `bw serve`) |
+| 🔒 Verrouillage      | Écran de verrouillage **optionnel** par code PIN ou phrase secrète, avec verrouillage automatique après inactivité                                                                                                                                                                                                                |
+| 📋 Snippets          | Nouvelle application : commandes shell enregistrées, classées par groupes, à insérer ou exécuter dans le terminal ouvert                                                                                                                                                                                                          |
+| 🗂️ Groupes           | **Groupes de serveurs** dans la barre latérale                                                                                                                                                                                                                                                                                    |
+| ✏️ Éditeur           | **Coloration syntaxique** dans l'éditeur de texte                                                                                                                                                                                                                                                                                 |
 
-- **All your servers on one desktop:** connect several servers at once; the top bar
-  shows each one's status, and every app works across them
-- Server manager: add, edit, delete, connect, disconnect, and test a connection
-  before saving, with an icon per server
-- SSH password authentication
-- SSH private-key authentication (unencrypted OpenSSH / PEM keys)
-- **System Monitor:** a fleet overview of every connected server (CPU, memory,
-  disk, network, and a sortable comparison table), plus per-server CPU, memory,
-  disk, network, processes, and systemd services
-- Process inspection and SIGTERM; start, stop, and restart systemd services
-- **Terminal:** browser terminal over WebSocket → SSH PTY, with a tab per server;
-  open it straight from a folder in Files
-- **Files (SFTP):** a Finder-style file manager with multi-select, drag to move,
-  copy/cut/paste, upload, a download queue, compress, and archive extraction
-  (`.zip`, `.tar`, `.tar.gz`/`.tgz`, `.tar.bz2`, `.tar.xz`, `.7z`, run on the
-  server with its own `tar` / `unzip` / `7z`)
-- **Copy between servers:** drag files or folders onto another connected server
-  in the Files sidebar, or copy on one server and paste on another
-- File previews (images, video, audio, PDF, text and code) and a plain text editor
-  for remote files
-- Linux-inspired desktop with a dock, window manager, wallpapers, folder
-  shortcuts, and macOS or Aura themes
-- AES-256-GCM encryption for stored credentials
-- **Remember or forget passwords:** a per-server "Remember password" option. Off means the
-  password lives in memory only and is asked when you connect. Desktop keeps a stable
-  encryption key (OS keychain, or a `0600` key file) so saved passwords survive restarts
-- **Passphrase-protected SSH keys**, stored encrypted together with the key
-- **Terminal customization:** Ctrl +/-/0 and Ctrl + wheel zoom, ten color themes, font and
-  cursor options with a live preview in Settings → Terminal, prompt highlighting done in the
-  UI (nothing is added to the server's shell), search (Ctrl+Shift+F), copy on select,
-  right-click paste, automatic reconnect
-- **Snippets app:** saved shell commands in groups; insert or run them in the open terminal
-- **KeyKey password vault:** encrypted in the browser (AES-256-GCM, PBKDF2 master password),
-  generator, clipboard auto-clear, auto-lock. Settings → Security can switch it to a Bitwarden
-  or Vaultwarden instance (read-only, through the local `bw serve` API)
-- **App lock:** optional PIN or passphrase screen lock with an idle timeout
-- **Server groups** in the sidebar, and **syntax highlighting** in the text editor
+### Audit de sécurité et correctifs
 
-Not implemented yet (UI may show Coming Soon):
+Trois passes d'audit ont été menées avec le
+[security-audit-skill de Cloudflare](https://github.com/cloudflare/security-audit-skill)
+(profil « quick », périmètres ciblés : ce n'est **pas** une certification). Correctifs principaux :
 
-- Full in-browser code editor (the current editor is a plain text editor)
-- Application, domain, and database management
-- ServerUI CLI
-- ServerUI agent
+- identifiants enregistrés **liés à leur serveur de destination** (impossible de les réutiliser
+  vers un autre hôte) ;
+- **épinglage de la clé d'hôte SSH** à la première connexion (TOFU), de façon atomique ;
+- mode web : vérification des en-têtes `Origin` / `Host` (anti-CSRF, anti-DNS rebinding),
+  `Content-Type: application/json` obligatoire, jeton en paramètre d'URL limité à deux routes ;
+- le mode bureau refuse de démarrer sans jeton d'authentification local ;
+- téléchargements : les types actifs (HTML, SVG...) ne sont jamais affichés en ligne, en-têtes
+  `nosniff` et CSP en bac à sable ;
+- analyse des archives `tar` durcie (liens symboliques et liens physiques vers des liens refusés) ;
+- ports Docker liés à `127.0.0.1` par défaut, capacités Tauri réduites, workflow de release
+  durci (entrées passées par variables d'environnement).
 
-Settings (About, runtime, shortcuts; desktop updates) is available.
+### ⚠️ Changements de comportement à connaître
 
-See [Current limitations](#current-limitations).
+- **Docker** : les ports sont liés à `127.0.0.1`. Pour un accès depuis le réseau local, définissez
+  `BIND_HOST`, `SERVERUI_ALLOWED_HOSTS` et `SERVERUI_ALLOWED_ORIGINS` (voir `.env.example`).
+- **Clé d'hôte SSH modifiée** : la connexion est refusée. Pour accepter la nouvelle clé,
+  ressaisissez le secret du serveur.
+- **Archives** dont un nom de fichier contient un texte ressemblant à une date : refusées par
+  précaution.
+
+### Installeur et version
+
+- Version **0.3.1**.
+- Installeur NSIS : installation par utilisateur, dossier du menu Démarrer, icône dédiée, langues
+  français / anglais.
+- Pastille violette sur l'icône de la barre des tâches (Windows uniquement).
+- Workflow [Windows Installer](.github/workflows/windows-installer.yml) : compile l'installeur et
+  publie une Release GitHub sans avoir à créer de tag à la main.
+
+## Fonctionnalités
+
+Opérationnel dans ce dépôt :
+
+- **Tous vos serveurs sur un seul bureau** : connectez plusieurs serveurs à la fois ; la barre
+  du haut affiche l'état de chacun, et chaque application fonctionne sur l'ensemble
+- Gestionnaire de serveurs : ajouter, modifier, supprimer, connecter, déconnecter et tester une
+  connexion avant d'enregistrer, avec une icône par serveur
+- Authentification SSH par mot de passe
+- Authentification SSH par clé privée (OpenSSH / PEM, **avec ou sans passphrase**)
+- **Moniteur système** : vue d'ensemble de tous les serveurs connectés (CPU, mémoire, disque,
+  réseau, tableau comparatif triable), plus le détail par serveur : CPU, mémoire, disque, réseau,
+  processus et services systemd
+- Inspection des processus et SIGTERM ; démarrage, arrêt et redémarrage des services systemd
+- **Terminal** : terminal navigateur via WebSocket → PTY SSH, avec un onglet par serveur ;
+  ouverture directe depuis un dossier dans Fichiers
+- **Fichiers (SFTP)** : gestionnaire de fichiers façon Finder avec sélection multiple,
+  glisser-déposer, copier/couper/coller, envoi, file de téléchargement, compression et extraction
+  d'archives (`.zip`, `.tar`, `.tar.gz`/`.tgz`, `.tar.bz2`, `.tar.xz`, `.7z`, exécutées sur le
+  serveur avec son propre `tar` / `unzip` / `7z`)
+- **Copie entre serveurs** : glissez des fichiers ou dossiers sur un autre serveur connecté dans
+  la barre latérale de Fichiers, ou copiez sur un serveur et collez sur un autre
+- Aperçu de fichiers (images, vidéo, audio, PDF, texte et code) et éditeur de texte pour les
+  fichiers distants, avec coloration syntaxique
+- Bureau inspiré de Linux avec dock, gestionnaire de fenêtres, fonds d'écran, raccourcis de
+  dossiers, thèmes macOS ou Aura
+- Chiffrement AES-256-GCM des identifiants stockés
+- Fonctionnalités du fork : mots de passe mémorisables, terminal personnalisable, Snippets,
+  coffre KeyKey, verrouillage de l'application, groupes de serveurs (voir
+  [Ce que ce fork change](#ce-que-ce-fork-change))
+
+Pas encore implémenté (l'interface peut afficher « Bientôt disponible ») :
+
+- Éditeur de code complet dans le navigateur (l'éditeur actuel est un éditeur de texte simple)
+- Gestion des applications, des domaines et des bases de données
+- CLI ServerUI
+- Agent ServerUI
+
+Les Paramètres (À propos, exécution, raccourcis ; mises à jour du bureau) sont disponibles.
+
+Voir [Limites actuelles](#limites-actuelles).
 
 ## Architecture
 
 ```
-Browser / UI
+Navigateur / UI
    │
    ▼
-Next.js Web
+Web Next.js
    │  HTTP / WebSocket
    ▼
-Go API Server
-   ├── PostgreSQL (web)  or  SQLite (desktop)
+Serveur API Go
+   ├── PostgreSQL (web)  ou  SQLite (bureau)
    └── SSH
         │
         ▼
-     Target server
+     Serveur cible
 ```
 
-The UI resolves the Go API through a small runtime helper so the same client can
-talk to a remote backend (web) or a local backend (desktop).
-Docker is a deployment option for web/self-hosted installs; the Go server also
-runs from source against PostgreSQL. Packaged desktop uses local SQLite and does
-not require Docker or PostgreSQL.
+L'interface trouve l'API Go grâce à un petit utilitaire d'exécution, ce qui permet au même
+client de parler à un backend distant (web) ou local (bureau). Docker est une option de
+déploiement pour les installations web / auto-hébergées ; le serveur Go peut aussi tourner
+depuis les sources avec PostgreSQL. Le bureau empaqueté utilise SQLite en local et ne nécessite
+ni Docker ni PostgreSQL.
 
-Details: [docs/architecture.md](docs/architecture.md) (includes **Runtime
-Architecture** for Web / Desktop / Source). Desktop hardening:
+Détails : [docs/architecture.md](docs/architecture.md) (inclut l'**architecture d'exécution**
+Web / Bureau / Sources). Durcissement du bureau :
 [docs/desktop-security.md](docs/desktop-security.md),
-[docs/desktop-storage.md](docs/desktop-storage.md). Releases and installers:
-[docs/releases.md](docs/releases.md). Product audit / manual QA:
+[docs/desktop-storage.md](docs/desktop-storage.md). Releases et installeurs :
+[docs/releases.md](docs/releases.md). Audit produit / QA manuelle :
 [docs/product-audit.md](docs/product-audit.md),
 [docs/manual-qa.md](docs/manual-qa.md).
 
-## How it works
+## Fonctionnement
 
-The UI sends a `serverId`. The Go process loads the stored host, decrypts credentials,
-and uses a per-server SSH pool. Files, terminal, and metrics are scoped to that ID.
+L'interface envoie un `serverId`. Le processus Go charge l'hôte enregistré, déchiffre les
+identifiants et utilise un pool SSH par serveur. Fichiers, terminal et métriques sont limités à
+cet identifiant.
 
-The browser never opens an SSH connection. The Go process stores server records
-in PostgreSQL (web) or local SQLite (desktop). Secrets are encrypted at rest with
-AES-256-GCM. A WebSocket terminal is a PTY on the selected host. File browsing
-uses SFTP on that same pooled connection.
+Le navigateur n'ouvre jamais de connexion SSH. Le processus Go stocke les fiches serveur dans
+PostgreSQL (web) ou SQLite local (bureau). Les secrets sont chiffrés au repos avec AES-256-GCM.
+Un terminal WebSocket est un PTY sur l'hôte choisi. La navigation dans les fichiers utilise SFTP
+sur cette même connexion poolée.
 
-## Project structure
+## Structure du projet
 
 ```
 serverui/
 ├── apps/
-│   ├── web/                 Next.js UI (shared by web + desktop)
-│   ├── server/              Go API, SSH, PostgreSQL
-│   └── desktop/             Tauri desktop shell
+│   ├── web/                 UI Next.js (partagée web + bureau)
+│   ├── server/              API Go, SSH, PostgreSQL
+│   └── desktop/             Coque de bureau Tauri
 ├── deploy/
-│   └── docker/              Compose files
+│   └── docker/              Fichiers Compose
 ├── docs/
 │   ├── architecture.md
 │   ├── desktop.md
@@ -171,6 +210,7 @@ serverui/
 │   ├── workflows/ci.yml
 │   ├── workflows/desktop.yml
 │   ├── workflows/desktop-release.yml
+│   ├── workflows/windows-installer.yml
 │   ├── ISSUE_TEMPLATE/
 │   └── pull_request_template.md
 ├── Makefile
@@ -182,140 +222,142 @@ serverui/
 └── .env.example
 ```
 
-## Requirements
+## Prérequis
 
-Verified against this repository:
+Vérifiés sur ce dépôt :
 
-| Tool       | Version used in development       |
-| ---------- | --------------------------------- |
-| Git        | any recent                        |
-| Docker     | 28.x (Compose v2)                 |
-| Node.js    | 22.x                              |
-| npm        | 10.x                              |
-| Go         | 1.26                              |
-| Rust       | stable (MSRV 1.77+) for desktop   |
-| Make       | GNU Make                          |
-| OpenSSL    | for generating the encryption key |
-| lazydocker | required for `make dev`           |
+| Outil      | Version utilisée en développement  |
+| ---------- | ---------------------------------- |
+| Git        | toute version récente              |
+| Docker     | 28.x (Compose v2)                  |
+| Node.js    | 22.x                               |
+| npm        | 10.x                               |
+| Go         | 1.26                               |
+| Rust       | stable (MSRV 1.77+) pour le bureau |
+| Make       | GNU Make                           |
+| OpenSSL    | pour générer la clé de chiffrement |
+| lazydocker | requis pour `make dev`             |
 
-Docker Desktop (or equivalent) must be running for `make start` and `make dev`.
+Docker Desktop (ou équivalent) doit être lancé pour `make start` et `make dev`.
 
-lazydocker is required for `make dev`. It is not required for `make start`.
-Install it from [lazydocker](https://github.com/jesseduffield/lazydocker).
+lazydocker est requis pour `make dev`, mais pas pour `make start`.
+Installation : [lazydocker](https://github.com/jesseduffield/lazydocker).
 
-## Getting started
+## Démarrage rapide
 
 ```bash
-git clone https://github.com/rakhechashubham/serverui.git
-cd serverui
+git clone https://github.com/remygtech-ops/serverui-reinvent.git
+cd serverui-reinvent
 cp .env.example .env
 make setup-env
 make hooks
 make start
 ```
 
-`make setup-env` copies `.env.example` when `.env` is missing and generates
-`SERVERUI_CREDENTIAL_ENCRYPTION_KEY` if the value is empty.
+`make setup-env` copie `.env.example` si `.env` n'existe pas et génère
+`SERVERUI_CREDENTIAL_ENCRYPTION_KEY` si la valeur est vide.
 
-`make hooks` is optional. It points Git at `.githooks` so local commits run
-format, lint, and tests. Hooks can be bypassed; CI is the real gate.
+`make hooks` est optionnel. Il fait pointer Git vers `.githooks` pour que les commits locaux
+lancent format, lint et tests. Les hooks peuvent être contournés ; la CI est la vraie barrière.
 
-Then open [http://localhost:3000](http://localhost:3000). The API listens on
+Ouvrez ensuite [http://localhost:3000](http://localhost:3000). L'API écoute sur
 [http://localhost:8080](http://localhost:8080).
 
-Add a server in the UI (name, host, SSH port, username, password or private key).
-ServerUI tests SSH from the Go container, stores the encrypted secret, and connects
-when you choose **Connect**.
+Ajoutez un serveur dans l'interface (nom, hôte, port SSH, utilisateur, mot de passe ou clé
+privée). ServerUI teste le SSH depuis le conteneur Go, stocke le secret chiffré et se connecte
+quand vous choisissez **Connecter**.
 
-## Environment configuration
+## Configuration de l'environnement
 
-Canonical file: `.env.example` (copy to `.env`). Compose also accepts
+Fichier de référence : `.env.example` (à copier en `.env`). Compose accepte aussi
 `deploy/docker/.env`.
 
-| Category       | Variable                             | Purpose                                                             |
-| -------------- | ------------------------------------ | ------------------------------------------------------------------- |
-| Runtime        | `HTTP_PORT`                          | Host port for the Go API                                            |
-| Runtime        | `WEB_PORT`                           | Host port for the web UI                                            |
-| Database       | `POSTGRES_USER`                      | PostgreSQL user                                                     |
-| Database       | `POSTGRES_PASSWORD`                  | PostgreSQL password (local only)                                    |
-| Database       | `POSTGRES_DB`                        | Database name                                                       |
-| Database       | `POSTGRES_HOST`                      | Optional; defaults to `127.0.0.1` natively; Compose sets `postgres` |
-| Database       | `DATABASE_URL`                       | Optional DSN; `POSTGRES_*` is enough in Compose                     |
-| Credentials    | `SERVERUI_CREDENTIAL_ENCRYPTION_KEY` | 32-byte key as 64 hex chars (backend only)                          |
-| API (optional) | `NEXT_PUBLIC_API_BASE`               | Browser-facing Go API origin when not same-origin                   |
-| Deployment     | `SERVER_INTERNAL_URL`                | Next.js server-side rewrite target (Compose sets this)              |
+| Catégorie       | Variable                             | Rôle                                                                |
+| --------------- | ------------------------------------ | ------------------------------------------------------------------- |
+| Exécution       | `HTTP_PORT`                          | Port hôte de l'API Go                                               |
+| Exécution       | `WEB_PORT`                           | Port hôte de l'interface web                                        |
+| Réseau (fork)   | `BIND_HOST`                          | Adresse d'écoute des ports publiés ; `127.0.0.1` par défaut         |
+| Sécurité (fork) | `SERVERUI_ALLOWED_HOSTS`             | Noms d'hôte autorisés en mode web (protection DNS rebinding)        |
+| Sécurité (fork) | `SERVERUI_ALLOWED_ORIGINS`           | Origines autorisées en mode web                                     |
+| Base de données | `POSTGRES_USER`                      | Utilisateur PostgreSQL                                              |
+| Base de données | `POSTGRES_PASSWORD`                  | Mot de passe PostgreSQL (local uniquement)                          |
+| Base de données | `POSTGRES_DB`                        | Nom de la base                                                      |
+| Base de données | `POSTGRES_HOST`                      | Optionnel ; `127.0.0.1` en natif ; Compose utilise `postgres`       |
+| Base de données | `DATABASE_URL`                       | DSN optionnel ; `POSTGRES_*` suffit avec Compose                    |
+| Identifiants    | `SERVERUI_CREDENTIAL_ENCRYPTION_KEY` | Clé de 32 octets en 64 caractères hexa (backend uniquement)         |
+| API (optionnel) | `NEXT_PUBLIC_API_BASE`               | Origine de l'API Go côté navigateur si ce n'est pas la même origine |
+| Déploiement     | `SERVER_INTERNAL_URL`                | Cible de réécriture côté serveur Next.js (définie par Compose)      |
 
-Generate a key:
+Générer une clé :
 
 ```bash
 openssl rand -hex 32
 ```
 
-Never commit `.env`, passwords, or private keys. Example hosts in docs use
-`203.0.113.10` and user `deploy`. Do not put the encryption key or SSH secrets
-in frontend env vars.
+Ne commitez jamais `.env`, des mots de passe ou des clés privées. Les hôtes d'exemple de la
+documentation utilisent `203.0.113.10` et l'utilisateur `deploy`. Ne mettez pas la clé de
+chiffrement ni des secrets SSH dans les variables d'environnement du frontend.
 
-## Development
+## Développement
 
 ```bash
 make dev
 ```
 
-This starts the development Docker environment (bind-mounted source, `next dev`,
-`go run`) and opens LazyDocker automatically.
+Lance l'environnement Docker de développement (sources montées, `next dev`, `go run`) et ouvre
+LazyDocker automatiquement.
 
-When you exit LazyDocker — or press Ctrl+C — ServerUI's development containers
-are removed. The PostgreSQL volume is preserved, so the local database is reused
-the next time you run `make dev`.
+Quand vous quittez LazyDocker, ou avec Ctrl+C, les conteneurs de développement sont supprimés.
+Le volume PostgreSQL est conservé : la base locale est réutilisée au prochain `make dev`.
 
-`make docker-tui` only opens LazyDocker for already-running services. It does not
-start or stop the stack.
+`make docker-tui` ouvre seulement LazyDocker pour des services déjà lancés. Il ne démarre ni
+n'arrête la pile.
 
-### Desktop application
+### Application de bureau
 
-**Install (recommended for users):** download a release artifact from
-[GitHub Releases](https://github.com/rakhechashubham/serverui/releases), verify
-SHA-256 checksums, install, and launch. No PostgreSQL, Docker, Node, Go, or Rust
-is required for packaged desktop — local SQLite is created automatically. Details:
+**Installer (recommandé pour les utilisateurs) :** téléchargez l'installeur depuis les
+[Releases GitHub](https://github.com/remygtech-ops/serverui-reinvent/releases), vérifiez les
+sommes SHA-256, installez et lancez. Aucun PostgreSQL, Docker, Node, Go ni Rust n'est requis pour
+le bureau empaqueté : la base SQLite locale est créée automatiquement. Détails :
 [docs/releases.md](docs/releases.md), [docs/desktop.md](docs/desktop.md),
 [docs/desktop-storage.md](docs/desktop-storage.md).
 
-**Develop from source:** requires Rust/cargo in addition to the web prerequisites.
-Default desktop-dev uses local SQLite (no Postgres required):
+**Développer depuis les sources :** nécessite Rust/cargo en plus des prérequis web. Le mode
+desktop-dev par défaut utilise SQLite local (pas de Postgres) :
 
 ```bash
 make setup-env
 make desktop-dev
 ```
 
-Optional Postgres desktop testing: `make desktop-db` then
+Test optionnel avec Postgres : `make desktop-db` puis
 `SERVERUI_STORAGE=postgres make desktop-dev`.
 
-Tauri loads the Next.js UI and starts `bin/serverui-server` on
-`127.0.0.1:<dynamic-port>` with a per-launch local auth token. See
-[docs/desktop.md](docs/desktop.md) and [apps/desktop/README.md](apps/desktop/README.md).
+Tauri charge l'interface Next.js et lance `bin/serverui-server` sur
+`127.0.0.1:<port-dynamique>` avec un jeton d'authentification local propre à chaque lancement.
+Voir [docs/desktop.md](docs/desktop.md) et [apps/desktop/README.md](apps/desktop/README.md).
 
 ```bash
 make desktop-build
 make desktop-build-macos          # arm64 + x64 → dist/macos/
-make desktop-build-windows-x64    # Windows host only
-make desktop-build-linux-x64      # Linux host only
-make desktop-build-all            # CI release instructions (no fake cross-build)
+make desktop-build-windows-x64    # hôte Windows uniquement
+make desktop-build-linux-x64      # hôte Linux uniquement
+make desktop-build-all            # instructions de release CI (pas de faux cross-build)
 ```
 
-Builds a Tauri bundle (platform installers depending on host) with a static UI
-export and sidecared Go binary. Signing and updater signatures require CI
-secrets; local builds are unsigned by default. Full production matrix:
+Produit un bundle Tauri (installeurs selon l'hôte) avec une UI exportée statiquement et le
+binaire Go en sidecar. La signature et les signatures de mise à jour demandent des secrets CI ;
+les builds locaux ne sont pas signés par défaut. Matrice complète de production :
 [docs/releases.md](docs/releases.md).
 
-## Local production start
+## Démarrage en production locale
 
 ```bash
 make start
 ```
 
-This builds production images and starts web, API, and Postgres in detached mode.
-The command returns immediately. Services keep running after the terminal is free.
+Construit les images de production et lance web, API et Postgres en arrière-plan. La commande
+rend la main immédiatement et les services continuent de tourner.
 
 ```bash
 make docker-ps
@@ -323,10 +365,9 @@ make docker-logs
 make docker-down
 ```
 
-`make docker-up` starts the development Compose stack in the background without
-LazyDocker.
+`make docker-up` lance la pile Compose de développement en arrière-plan, sans LazyDocker.
 
-Native checks (after `npm install` in `apps/web`):
+Vérifications natives (après `npm install` dans `apps/web`) :
 
 ```bash
 make test
@@ -336,136 +377,156 @@ make format-check
 make build
 ```
 
-Go sources live in `apps/server`. The web app lives in `apps/web`.
+Les sources Go sont dans `apps/server`, l'application web dans `apps/web`.
 
-## Testing
+## Tests
 
 ```bash
 make test
 ```
 
-Runs Vitest in `apps/web` and `go test ./...` in `apps/server`.
+Lance Vitest dans `apps/web` et `go test ./...` dans `apps/server`.
 
-## Linting
+## Lint
 
 ```bash
 make lint
 ```
 
-ESLint for the web app, `go vet` for the backend.
+ESLint pour l'application web, `go vet` pour le backend.
 
-## Formatting
+## Formatage
 
 ```bash
 make format         # gofmt + Prettier
-make format-check   # fail if anything would change
+make format-check   # échoue si quelque chose changerait
 ```
 
-## Building
+## Compilation
 
 ```bash
 make build
 ```
 
-Produces a Next.js production build in `apps/web/.next` and
-`bin/serverui-server`. Binaries and `.next` are gitignored.
+Produit un build de production Next.js dans `apps/web/.next` et `bin/serverui-server`. Les
+binaires et `.next` sont ignorés par Git.
 
 ```bash
 make docker-build
 ```
 
-Builds production Compose images without starting them. `make start` builds and
-starts those images. Development images are built by `make dev` / `make docker-up`.
+Construit les images Compose de production sans les lancer. `make start` les construit et les
+démarre. Les images de développement sont construites par `make dev` / `make docker-up`.
 
-## Security
+## Sécurité
 
-Credentials are encrypted at rest. GET APIs do not return secrets. See
-[SECURITY.md](SECURITY.md).
+Les identifiants sont chiffrés au repos. Les API GET ne renvoient pas les secrets. Voir
+[SECURITY.md](SECURITY.md). Le détail de l'audit du fork est résumé dans
+[Ce que ce fork change](#ce-que-ce-fork-change).
 
-Report vulnerabilities privately to [contact@skyrekon.com](mailto:contact@skyrekon.com).
-Do not attach keys or passwords to issues.
+Signalez les vulnérabilités de ce fork en privé via les
+[Security advisories](https://github.com/remygtech-ops/serverui-reinvent/security/advisories/new)
+du dépôt. Pour le projet original : [contact@skyrekon.com](mailto:contact@skyrekon.com).
+N'attachez jamais de clés ni de mots de passe à une issue.
 
-## Contributing
+## Contribuer
 
-ServerUI is open source under the Apache License 2.0.
+ServerUI est open source sous licence Apache 2.0.
 
-- [CONTRIBUTING.md](CONTRIBUTING.md) — setup, branch names, commits, PRs
+- [CONTRIBUTING.md](CONTRIBUTING.md) : mise en place, noms de branches, commits, PR
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-- Issues: bug and feature templates under `.github/ISSUE_TEMPLATE/`
-- CI: `.github/workflows/ci.yml` runs format, lint, tests, build, and a Docker image build
+- Issues : modèles de bug et de fonctionnalité dans `.github/ISSUE_TEMPLATE/`
+- CI : `.github/workflows/ci.yml` lance format, lint, tests, build et un build d'image Docker
 
-Local Git hooks (`make hooks`) block commits when format, lint, or tests fail. Hooks
-are optional local safeguards; CI is the gate.
+Les hooks Git locaux (`make hooks`) bloquent les commits si le format, le lint ou les tests
+échouent. Ce sont des garde-fous locaux optionnels ; la CI fait foi.
 
-There is a tag-driven desktop release workflow (`.github/workflows/desktop-release.yml`).
-See [docs/releases.md](docs/releases.md).
+Deux workflows de release existent : `.github/workflows/desktop-release.yml` (déclenché par un
+tag, toutes plateformes) et `.github/workflows/windows-installer.yml` (installeur Windows, Release
+créée automatiquement). Voir [docs/releases.md](docs/releases.md).
 
-## Roadmap
+## Feuille de route
 
-Planned, not available:
+Prévu, pas encore disponible :
 
-- Code signing / notarization for all desktop channels (secrets-dependent)
-- Broader installer runtime verification matrix
-- ServerUI CLI
-- Optional host agent
-- In-browser editor
-- Application, domain, and database management
+- Signature de code / notarisation pour tous les canaux de bureau (dépend de secrets)
+- Matrice de vérification d'exécution des installeurs plus large
+- CLI ServerUI
+- Agent d'hôte optionnel
+- Éditeur dans le navigateur
+- Gestion des applications, des domaines et des bases de données
+- Serveur MCP pour Claude Desktop (reporté)
 
-Delivered / in tree:
+Livré / dans l'arbre :
 
-- OS keychain credential storage for desktop
-- Local SQLite for packaged/default desktop (Postgres remains for web)
-- Desktop packaging matrix (macOS arm64+x64, Windows x64, Linux x64) + release CI
-- Settings (About, runtime, desktop updates UI)
-- Multi-server desktop, fleet System Monitor, cross-server copy, and terminal tabs (0.3.0)
+- Stockage des identifiants dans le trousseau du système pour le bureau
+- SQLite local pour le bureau empaqueté (Postgres reste utilisé pour le web)
+- Matrice de packaging bureau (macOS arm64+x64, Windows x64, Linux x64) + CI de release
+- Paramètres (À propos, exécution, mises à jour du bureau)
+- Bureau multi-serveurs, moniteur système global, copie entre serveurs et onglets de terminal (0.3.0)
+- Fork : mots de passe mémorisables, terminal personnalisable, KeyKey, verrouillage, Snippets,
+  groupes, coloration syntaxique, audit de sécurité, pastille violette (0.3.1)
 
 ## FAQ
 
-**Does the browser SSH to my VPS?**  
-No. The Go server does.
+**Le navigateur se connecte-t-il en SSH à mon VPS ?**  
+Non, c'est le serveur Go qui le fait.
 
-**Can I add many servers?**  
-Yes, and you can keep them all connected at once. Each has its own stored config,
-encrypted secret, and SSH connection.
+**Puis-je ajouter plusieurs serveurs ?**  
+Oui, et vous pouvez les garder tous connectés en même temps. Chacun a sa configuration, son
+secret chiffré et sa connexion SSH.
 
-**Do files copied between servers go directly host to host?**  
-No. The ServerUI backend reads from one server over SFTP and writes to the other,
-so the data passes through the machine running the backend (your computer for the
-desktop app).
+**Les fichiers copiés entre serveurs passent-ils directement d'un hôte à l'autre ?**  
+Non. Le backend ServerUI lit sur un serveur en SFTP et écrit sur l'autre : les données passent
+par la machine qui héberge le backend (votre ordinateur pour l'application de bureau).
 
-**Are Applications / Domains / Databases real?**  
-Not yet. Those windows are Coming Soon placeholders.
+**Mes mots de passe sont-ils enregistrés en clair ?**  
+Non. Ils sont chiffrés (AES-256-GCM). Vous pouvez aussi décocher « Se souvenir du mot de passe »
+pour qu'ils ne restent qu'en mémoire.
 
-**Is there a CLI or agent?**  
-No. Makefile targets for them were removed because the code is not in this repository.
+**Les Applications / Domaines / Bases de données existent-ils vraiment ?**  
+Pas encore. Ces fenêtres sont des espaces réservés « Bientôt disponible ».
 
-## Current limitations
+**Y a-t-il une CLI ou un agent ?**  
+Non. Les cibles Makefile correspondantes ont été retirées car le code n'est pas dans ce dépôt.
 
-- Not a production-hardened multi-tenant SaaS. Treat it as a self-hosted control panel.
-- Passphrase-protected private keys are rejected with an explicit error.
-- Host key verification accepts any remote host key (TOFU / pinning is not implemented).
-- There is no user login, SSO, or RBAC for the ServerUI app itself.
-- Applications, Domains, and Databases are not implemented. The editor is a plain
-  text editor (files up to 512 KB, no sudo).
-- Process and service actions (kill, start/stop/restart) work in a server's own
-  System Monitor (Servers → View Metrics). In the all-servers monitor opened from
-  the dock they don't act yet.
-- A drop onto another server in the Files sidebar copies into that server's home
-  folder and never overwrites an existing item.
-- CLI and agent are not implemented.
-- Archive extraction needs `tar` (plus `gzip` / `bzip2` / `xz`), Info-ZIP `unzip`, or
-  `7z` on the server. Password-protected archives, `.rar`, and single compressed
-  files such as `.gz` are not supported.
-- Desktop app: Tauri shell with release installers; code signing / notarization
-  depend on CI secrets and are not claimed complete until configured and verified.
-- Official GitHub Release tags publish when maintainers cut `vX.Y.Z`.
+## Limites actuelles
+
+- Ce n'est pas un SaaS multi-tenant durci pour la production. Considérez-le comme un panneau de
+  contrôle auto-hébergé.
+- Vérification de la clé d'hôte SSH en mode **TOFU** : la première clé vue est épinglée, puis un
+  changement est refusé tant que vous ne ressaisissez pas le secret du serveur. Il n'y a pas
+  d'import d'empreintes ni d'autorité de certification SSH.
+- L'application ServerUI elle-même n'a pas de connexion utilisateur, de SSO ni de RBAC. Le
+  verrouillage par PIN / phrase est un verrou d'écran local, pas un système de comptes.
+- Les Applications, Domaines et Bases de données ne sont pas implémentés. L'éditeur est un éditeur
+  de texte simple (fichiers jusqu'à 512 Ko, pas de sudo).
+- Les actions sur les processus et services (kill, start/stop/restart) fonctionnent dans le
+  Moniteur système d'un serveur (Serveurs → Voir les métriques). Dans le moniteur global ouvert
+  depuis le dock, elles n'agissent pas encore.
+- Un dépôt sur un autre serveur dans la barre latérale de Fichiers copie dans le dossier personnel
+  de ce serveur et n'écrase jamais un élément existant.
+- Pas de CLI ni d'agent.
+- L'extraction d'archives nécessite `tar` (plus `gzip` / `bzip2` / `xz`), `unzip` Info-ZIP ou `7z`
+  sur le serveur. Les archives protégées par mot de passe, les `.rar` et les fichiers compressés
+  seuls comme `.gz` ne sont pas pris en charge. Les archives contenant des noms de fichiers qui
+  ressemblent à une date de listing sont refusées par précaution.
+- KeyKey (coffre natif) est chiffré dans le navigateur ; l'intégration Bitwarden / Vaultwarden est
+  en lecture seule.
+- Application de bureau : coque Tauri avec installeurs de release. L'installeur Windows de ce fork
+  n'est pas signé, et le code Windows de la pastille n'a pas été testé sur une vraie machine avant
+  publication.
+- L'audit de sécurité du fork est partiel (voir plus haut) et ne remplace pas un audit complet.
 
 ## Contact
 
-[contact@skyrekon.com](mailto:contact@skyrekon.com)
+Fork : [remygtech-ops](https://github.com/remygtech-ops) (issues du dépôt
+[serverui-reinvent](https://github.com/remygtech-ops/serverui-reinvent/issues)).
 
-Use this address for security reports, contributor questions, and any other contact.
+Projet original : [contact@skyrekon.com](mailto:contact@skyrekon.com), pour les rapports de
+sécurité, les questions de contribution et tout autre contact.
 
-## License
+## Licence
 
-Apache License 2.0. Copyright 2026 Skyrekon Private Limited. See [LICENSE](LICENSE).
+Apache License 2.0. Copyright 2026 Skyrekon Private Limited pour le projet original ; les
+modifications de ce fork sont publiées sous la même licence. Voir [LICENSE](LICENSE).
