@@ -462,6 +462,21 @@ export function EditorMacIcon({ className }: MacIconProps) {
   );
 }
 
+/** KeyKey: teal plate with a key. */
+export function KeyKeyMacIcon({ className }: MacIconProps) {
+  return (
+    <MacIconPlate className={className} from="#35D3B0" to="#0B8F7A">
+      <g fill="none" stroke="#fff" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="46" cy="64" r="20" />
+        <path d="M66 64h42" />
+        <path d="M92 64v14" />
+        <path d="M104 64v10" />
+      </g>
+      <circle cx="46" cy="64" r="6" fill="#fff" />
+    </MacIconPlate>
+  );
+}
+
 /** Snippets: violet plate with a command line and a bracket pair. */
 export function SnippetsMacIcon({ className }: MacIconProps) {
   return (

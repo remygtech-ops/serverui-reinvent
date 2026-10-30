@@ -6,6 +6,7 @@ import {
   EditorMacIcon,
   FilesMacIcon,
   InfoMacIcon,
+  KeyKeyMacIcon,
   MonitorMacIcon,
   SettingsMacIcon,
   SnippetsMacIcon,
@@ -90,6 +91,10 @@ export function DatabasesGlyph({ className }: IconProps) {
   return <MacDuskIcon Icon={TablePlus} className={className} bg="#4A6570" fg="#E4E6EA" />;
 }
 
+export function KeyKeyGlyph({ className }: IconProps) {
+  return <KeyKeyMacIcon className={className} />;
+}
+
 export function SnippetsGlyph({ className }: IconProps) {
   return <SnippetsMacIcon className={className} />;
 }
@@ -112,6 +117,7 @@ export const DOCK_GLYPHS: Record<DockAppId | "info", ComponentType<IconProps>> =
   domains: DomainsGlyph,
   databases: DatabasesGlyph,
   snippets: SnippetsGlyph,
+  keykey: KeyKeyGlyph,
   settings: SettingsGlyph,
   info: InfoGlyph,
 };
