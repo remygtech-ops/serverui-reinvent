@@ -68,10 +68,7 @@
         "displayLanguageSelector": true
       },
       "wix": {
-        "language": [
-          "fr-FR",
-          "en-US"
-        ]
+        "language": "en-US"
       }
     },
     "linux": {
