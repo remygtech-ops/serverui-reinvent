@@ -49,9 +49,11 @@ func (s *MemoryStore) List(_ context.Context) ([]Record, error) {
 func (s *MemoryStore) Update(_ context.Context, rec Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.items[rec.ID]; !ok {
+	old, ok := s.items[rec.ID]
+	if !ok {
 		return ErrNotFound
 	}
+	rec.HostKey = old.HostKey // only SetHostKey and ClearHostKey change the pin
 	s.items[rec.ID] = rec
 	return nil
 }
@@ -81,5 +83,31 @@ func (s *MemoryStore) UpsertCredential(_ context.Context, cred Credential) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.creds[cred.ServerID] = cred
+	return nil
+}
+
+func (s *MemoryStore) SetHostKey(_ context.Context, id, fingerprint string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.items[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if rec.HostKey == "" {
+		rec.HostKey = fingerprint
+		s.items[id] = rec
+	}
+	return nil
+}
+
+func (s *MemoryStore) ClearHostKey(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.items[id]
+	if !ok {
+		return ErrNotFound
+	}
+	rec.HostKey = ""
+	s.items[id] = rec
 	return nil
 }

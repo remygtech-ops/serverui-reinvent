@@ -105,7 +105,13 @@ export function AddServerModal({
   const testAbort = useRef<AbortController | null>(null);
 
   const values = { name, host: address, port, username, auth, password, privateKey };
-  const context = { editing, savedAuth: server?.authType };
+  const context = {
+    editing,
+    savedAuth: server?.authType,
+    saved: server
+      ? { host: server.address, port: server.sshPort || 22, username: server.username || "" }
+      : undefined,
+  };
   const errors = validateServerForm(values, context, "save");
   const visibleErrors: FieldErrors = {};
   for (const field of FIELD_ORDER) {

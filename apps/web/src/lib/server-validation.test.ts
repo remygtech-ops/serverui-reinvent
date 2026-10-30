@@ -95,6 +95,20 @@ describe("validateServerForm", () => {
     expect(validateServerForm({ ...valid, password: "" }, ctx, "save")).toEqual({});
   });
 
+  it("requires the secret again when the host, port or username change", () => {
+    const ctx = {
+      editing: true,
+      savedAuth: "password" as const,
+      saved: { host: valid.host, port: Number(valid.port), username: valid.username },
+    };
+    expect(validateServerForm({ ...valid, password: "" }, ctx, "save")).toEqual({});
+    for (const change of [{ host: "198.51.100.7" }, { port: "2222" }, { username: "root" }]) {
+      const errors = validateServerForm({ ...valid, ...change, password: "" }, ctx, "save");
+      expect(errors.secret).toMatch(/Enter the password again/);
+      expect(validateServerForm({ ...valid, ...change, password: "new" }, ctx, "save")).toEqual({});
+    }
+  });
+
   it("requires a new secret when switching auth method", () => {
     const ctx = { editing: true, savedAuth: "password" as const };
     expect(validateServerForm({ ...valid, auth: "private_key" }, ctx, "save")).toEqual({

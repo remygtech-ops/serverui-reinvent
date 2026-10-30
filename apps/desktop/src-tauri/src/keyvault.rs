@@ -58,10 +58,27 @@ pub fn resolve_encryption_key(
 }
 
 fn read_key_file(data_dir: &Path) -> Option<String> {
-    let raw = fs::read_to_string(data_dir.join(KEY_FILE)).ok()?;
+    let path = data_dir.join(KEY_FILE);
+    let raw = fs::read_to_string(&path).ok()?;
+    tighten_key_file_permissions(&path);
     let key = raw.trim();
     (!key.is_empty()).then(|| key.to_string())
 }
+
+/// The 0600 mode is only applied when the file is created, so an older or copied key file can
+/// be readable by other local users. Close that on every read (best effort, Unix only).
+#[cfg(unix)]
+fn tighten_key_file_permissions(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(meta) = fs::metadata(path) {
+        if meta.permissions().mode() & 0o077 != 0 {
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn tighten_key_file_permissions(_path: &Path) {}
 
 fn write_key_file(data_dir: &Path, key: &str) -> Result<(), String> {
     fs::create_dir_all(data_dir)
@@ -123,6 +140,20 @@ mod tests {
         let dir = temp_dir("corrupt");
         fs::write(dir.join(KEY_FILE), "  \n").unwrap();
         assert_eq!(read_key_file(&dir), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reading_a_loose_key_file_tightens_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("loose");
+        let path = dir.join(KEY_FILE);
+        fs::write(&path, random_hex_key()).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(read_key_file(&dir).is_some());
+        let mode = fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0);
         let _ = fs::remove_dir_all(&dir);
     }
 

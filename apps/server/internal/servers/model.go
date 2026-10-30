@@ -27,9 +27,11 @@ type Record struct {
 	LastError  string
 	IconID     string
 	CustomIcon string
-	LastSeen   *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// HostKey is the pinned SSH host key fingerprint (SHA256). Empty until the first connection.
+	HostKey   string
+	LastSeen  *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type Credential struct {

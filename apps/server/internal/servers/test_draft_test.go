@@ -119,9 +119,9 @@ func TestTestDraftEditUsesSavedCredentialAndChangesNothing(t *testing.T) {
 	dialer := &recordingDialer{err: errors.New("ssh: handshake failed: ssh: unable to authenticate")}
 	svc.SetDialer(dialer.dial)
 
-	// New host and user, blank password: the saved password must be used.
+	// Same host, port and user, blank password: the saved password is used.
 	result, err := svc.TestDraft(ctx, created.ID, Input{
-		Host: "198.51.100.7", Port: 22, Username: "root", AuthType: AuthPassword,
+		Host: "203.0.113.10", Port: 22, Username: "deploy", AuthType: AuthPassword,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestTestDraftEditUsesSavedCredentialAndChangesNothing(t *testing.T) {
 	if result.Code != sshx.CodeAuthFailed {
 		t.Fatalf("result = %+v", result)
 	}
-	if dialer.cfg.Host != "198.51.100.7" || dialer.cfg.Username != "root" {
+	if dialer.cfg.Host != "203.0.113.10" || dialer.cfg.Username != "deploy" {
 		t.Fatalf("dialed %+v", dialer.cfg)
 	}
 	if pw, ok := dialer.auth.(sshx.PasswordAuth); !ok || pw.Password != "saved-secret" {
@@ -170,5 +170,52 @@ func TestTestDraftUnknownServer(t *testing.T) {
 	})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSavedCredentialIsNeverSentToAnotherDestination(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	created, err := svc.Create(ctx, Input{
+		Name: "Production", Host: "203.0.113.10", Port: 22, Username: "deploy",
+		AuthType: AuthPassword, Password: "saved-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := &recordingDialer{}
+	svc.SetDialer(dialer.dial)
+
+	for name, in := range map[string]Input{
+		"host":     {Host: "198.51.100.7", Port: 22, Username: "deploy", AuthType: AuthPassword},
+		"port":     {Host: "203.0.113.10", Port: 2222, Username: "deploy", AuthType: AuthPassword},
+		"username": {Host: "203.0.113.10", Port: 22, Username: "root", AuthType: AuthPassword},
+	} {
+		result, err := svc.TestDraft(ctx, created.ID, in)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if result.OK || result.Code != CodeSecretRequiredForNewDestination {
+			t.Fatalf("%s: result = %+v", name, result)
+		}
+		if dialer.cfg.Host != "" {
+			t.Fatalf("%s: dialed %+v with a saved credential", name, dialer.cfg)
+		}
+	}
+
+	// Updating the destination without a new secret is refused and nothing is dialed.
+	if _, err := svc.Update(ctx, created.ID, Input{
+		Name: "Production", Host: "198.51.100.7", Port: 22, Username: "deploy", AuthType: AuthPassword,
+	}); err == nil {
+		t.Fatal("changing the host without a new secret must be refused")
+	}
+	if dialer.cfg.Host != "" {
+		t.Fatalf("update dialed %+v with the saved credential", dialer.cfg)
+	}
+	// A new secret for the new destination is fine.
+	if _, err := svc.Update(ctx, created.ID, Input{
+		Name: "Production", Host: "198.51.100.7", Port: 22, Username: "deploy", AuthType: AuthPassword, Password: "new-secret",
+	}); err != nil {
+		t.Fatalf("new host with a new secret: %v", err)
 	}
 }

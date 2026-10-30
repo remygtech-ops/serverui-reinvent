@@ -54,10 +54,22 @@ describe("bitwarden bw serve client", () => {
   it("surfaces the unlock error message", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => reply({ success: false, message: "Invalid master password." }, false)),
+      vi.fn((url: string) =>
+        String(url).endsWith("/status")
+          ? reply({ success: true, data: { template: { status: "locked" } } })
+          : reply({ success: false, message: "Invalid master password." }, false),
+      ),
     );
     await expect(bitwardenUnlock("http://localhost:8087", "x")).rejects.toThrow(
       "Invalid master password.",
     );
+  });
+
+  it("never sends the master password to something that does not look like bw serve", async () => {
+    const fetchMock = vi.fn(() => reply({ hello: "world" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(bitwardenUnlock("http://localhost:8087", "secret-pw")).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("secret-pw");
   });
 });

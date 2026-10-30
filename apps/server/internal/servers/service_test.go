@@ -133,9 +133,16 @@ func TestIconUpdateDoesNotReconnect(t *testing.T) {
 	if dials != 0 || updated.Status != StatusOnline || updated.IconID != "cloud" {
 		t.Fatalf("dials %d status %s icon %s", dials, updated.Status, updated.IconID)
 	}
-	_, err = svc.Update(ctx, created.ID, Input{
+	// Moving to another host needs the secret again: the saved one is never reused for it.
+	if _, err = svc.Update(ctx, created.ID, Input{
 		Name: "Lab", Host: "203.0.113.11", Port: 22, Username: "deploy",
 		AuthType: AuthPassword, IconID: "cloud",
+	}); err == nil {
+		t.Fatal("host change without a new secret must be refused")
+	}
+	_, err = svc.Update(ctx, created.ID, Input{
+		Name: "Lab", Host: "203.0.113.11", Port: 22, Username: "deploy",
+		AuthType: AuthPassword, Password: "pw-for-new-host", IconID: "cloud",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -379,5 +386,57 @@ func TestPlainKeysKeepTheirOldStoredForm(t *testing.T) {
 	key, pass = unpackKey(packKey("KEYDATA", "pw"))
 	if key != "KEYDATA" || pass != "pw" {
 		t.Fatalf("unpack packed: %q %q", key, pass)
+	}
+}
+
+func TestHostKeyIsPinnedOnFirstConnectionAndResetWhenTheSecretIsEnteredAgain(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	svc.SetDialer(func(cfg sshx.Config, auth sshx.AuthMethod) error {
+		if cfg.PinnedHostKey != "" && cfg.PinnedHostKey != "SHA256:first" {
+			return fmt.Errorf("host key mismatch")
+		}
+		if cfg.PinnedHostKey == "" && cfg.OnHostKey != nil {
+			cfg.OnHostKey("SHA256:first")
+		}
+		return nil
+	})
+	created, err := svc.Create(ctx, Input{
+		Name: "Prod", Host: "203.0.113.40", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "pw",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := svc.store.Get(ctx, created.ID)
+	if rec.HostKey != "SHA256:first" {
+		t.Fatalf("host key not pinned on first connection: %q", rec.HostKey)
+	}
+	// Ordinary status updates must not wipe the pin.
+	rec.Status = StatusOffline
+	if err := svc.store.Update(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ = svc.store.Get(ctx, created.ID); rec.HostKey != "SHA256:first" {
+		t.Fatalf("a status update dropped the pin: %q", rec.HostKey)
+	}
+	// Entering the secret again is how the operator accepts a new key: the pin is cleared and
+	// the next connection pins whatever the server presents.
+	if _, err := svc.Update(ctx, created.ID, Input{
+		Name: "Prod", Host: "203.0.113.40", Port: 22, Username: "me", AuthType: AuthPassword, Password: "pw2",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ = svc.store.Get(ctx, created.ID); rec.HostKey != "SHA256:first" {
+		t.Fatalf("expected the reconnect to pin again, got %q", rec.HostKey)
+	}
+	// Renaming alone keeps the pin untouched.
+	if _, err := svc.Update(ctx, created.ID, Input{
+		Name: "Prod 2", Host: "203.0.113.40", Port: 22, Username: "me", AuthType: AuthPassword,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rec, _ = svc.store.Get(ctx, created.ID); rec.HostKey != "SHA256:first" || rec.Name != "Prod 2" {
+		t.Fatalf("rename changed the pin: %+v", rec)
 	}
 }

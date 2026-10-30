@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -78,7 +79,12 @@ func (s *Server) Handler() http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if originAllowed(origin) {
+		if origin != "" && !requestOriginAllowed(r) {
+			// Browsers always send Origin on cross-site requests and WebSocket upgrades.
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "origin not allowed"})
+			return
+		}
+		if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS")
@@ -88,10 +94,6 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 		w.Header().Set("Pragma", "no-cache")
 		if r.Method == http.MethodOptions {
-			if origin != "" && !originAllowed(origin) {
-				w.WriteHeader(http.StatusForbidden)
-				return
-			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -920,6 +922,11 @@ func (s *Server) downloadFile(w http.ResponseWriter, r *http.Request) {
 		disposition = "attachment"
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disposition, info.Name()))
+	// Remote files are untrusted: never let the browser sniff them or run script from them.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if !filesystem.PassiveMedia(mime) {
+		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'")
+	}
 
 	size := info.Size()
 	rangeHeader := r.Header.Get("Range")
@@ -1047,7 +1054,13 @@ func bodyOrQueryServerID(r *http.Request, bodyID string) (string, error) {
 	return id, nil
 }
 
+var errNotJSON = errors.New("content type must be application/json")
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, dest any) error {
+	// Requiring a JSON content type keeps cross-site "simple" requests (text/plain forms) out.
+	if mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mt != "application/json" {
+		return errNotJSON
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	decoder := json.NewDecoder(r.Body)
 	return decoder.Decode(dest)

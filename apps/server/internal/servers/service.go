@@ -156,7 +156,8 @@ func (s *Service) Update(ctx context.Context, id string, input Input) (Public, e
 	if err != nil {
 		return Public{}, err
 	}
-	requireSecret := input.Password != "" || input.PrivateKey != "" || input.AuthType != existing.AuthType
+	requireSecret := input.Password != "" || input.PrivateKey != "" || input.AuthType != existing.AuthType ||
+		!sameDestination(existing, input)
 	if err := Validate(input, requireSecret); err != nil {
 		return Public{}, err
 	}
@@ -231,6 +232,14 @@ func (s *Service) Update(ctx context.Context, id string, input Input) (Public, e
 	}
 	if err := s.store.Update(ctx, existing); err != nil {
 		return Public{}, err
+	}
+	if requireSecret {
+		// A new destination, or a secret entered again on purpose, is how the operator accepts a
+		// different host key: forget the old one so the next connection pins the current key.
+		if err := s.store.ClearHostKey(ctx, existing.ID); err != nil {
+			return Public{}, err
+		}
+		existing.HostKey = ""
 	}
 	log.Printf("server.updated id=%s name=%s", existing.ID, existing.Name)
 	if reconnect {
@@ -391,6 +400,17 @@ func (s *Service) Test(ctx context.Context, id string) (TestResult, error) {
 	}, nil
 }
 
+// pinHostKey returns the first-use callback that stores a server's host key fingerprint.
+func (s *Service) pinHostKey(id string) func(string) {
+	return func(fingerprint string) {
+		if err := s.store.SetHostKey(context.Background(), id, fingerprint); err != nil {
+			log.Printf("server.hostkey id=%s pin failed", id)
+			return
+		}
+		log.Printf("server.hostkey id=%s pinned", id)
+	}
+}
+
 func (s *Service) loadAuth(id string) (sshx.Config, sshx.AuthMethod, error) {
 	ctx := context.Background()
 	rec, err := s.store.Get(ctx, id)
@@ -402,9 +422,11 @@ func (s *Service) loadAuth(id string) (sshx.Config, sshx.AuthMethod, error) {
 		return sshx.Config{}, nil, err
 	}
 	cfg := sshx.Config{
-		Host:     rec.Host,
-		Port:     rec.Port,
-		Username: rec.Username,
+		Host:          rec.Host,
+		Port:          rec.Port,
+		Username:      rec.Username,
+		PinnedHostKey: rec.HostKey,
+		OnHostKey:     s.pinHostKey(rec.ID),
 	}
 	return cfg, auth, nil
 }
@@ -501,7 +523,7 @@ func (s *Service) secret(input Input, required bool) (string, error) {
 }
 
 func (s *Service) testAndUpdate(ctx context.Context, rec Record, secret string) (Record, error) {
-	cfg := sshx.Config{Host: rec.Host, Port: rec.Port, Username: rec.Username}
+	cfg := sshx.Config{Host: rec.Host, Port: rec.Port, Username: rec.Username, PinnedHostKey: rec.HostKey, OnHostKey: s.pinHostKey(rec.ID)}
 	var auth sshx.AuthMethod
 	var err error
 	if secret != "" {

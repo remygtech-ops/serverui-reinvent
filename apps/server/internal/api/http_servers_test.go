@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,7 +49,7 @@ func TestServerCRUDHidesCredentials(t *testing.T) {
 		"authType":"password",
 		"password":"super-secret"
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/api/servers", strings.NewReader(body))
+	req := newJSONRequest(http.MethodPost, "/api/servers", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -91,7 +92,7 @@ func TestServerCRUDHidesCredentials(t *testing.T) {
 	}
 
 	update := `{"name":"Prod","host":"203.0.113.10","port":22,"username":"deploy","authType":"password"}`
-	req = httptest.NewRequest(http.MethodPut, "/api/servers/"+id, strings.NewReader(update))
+	req = newJSONRequest(http.MethodPut, "/api/servers/"+id, strings.NewReader(update))
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -137,7 +138,7 @@ func TestServerIconRoundTripHidesFileReference(t *testing.T) {
 		"authType":"password","password":"secret","iconId":"storage","iconImage":"` + png + `"
 	}`
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/servers", strings.NewReader(body)))
+	handler.ServeHTTP(rec, newJSONRequest(http.MethodPost, "/api/servers", strings.NewReader(body)))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create %d %s", rec.Code, rec.Body.String())
 	}
@@ -167,7 +168,7 @@ func TestServerIconRoundTripHidesFileReference(t *testing.T) {
 
 func TestCreateRejectsInvalidHost(t *testing.T) {
 	handler := testAPI(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/servers", bytes.NewBufferString(`{
+	req := newJSONRequest(http.MethodPost, "/api/servers", bytes.NewBufferString(`{
 		"name":"Bad","host":"not a host","port":22,"username":"u","authType":"password","password":"x"
 	}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -191,7 +192,7 @@ func TestFilesRequireServerID(t *testing.T) {
 func TestTestConnectionDraftDoesNotSave(t *testing.T) {
 	handler := testAPI(t)
 	body := `{"host":"203.0.113.10","port":22,"username":"deploy","authType":"password","password":"super-secret"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/servers/test-connection", strings.NewReader(body))
+	req := newJSONRequest(http.MethodPost, "/api/servers/test-connection", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -218,11 +219,18 @@ func TestTestConnectionDraftDoesNotSave(t *testing.T) {
 func TestTestConnectionDraftRejectsInvalidHost(t *testing.T) {
 	handler := testAPI(t)
 	body := `{"host":"not a host","port":22,"username":"deploy","authType":"password","password":"x"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/servers/test-connection", bytes.NewBufferString(body))
+	req := newJSONRequest(http.MethodPost, "/api/servers/test-connection", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
+}
+
+// newJSONRequest builds a request the way the web client does: JSON body, JSON content type.
+func newJSONRequest(method, target string, body io.Reader) *http.Request {
+	req := httptest.NewRequest(method, target, body)
+	req.Header.Set("Content-Type", "application/json")
+	return req
 }

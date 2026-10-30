@@ -12,6 +12,11 @@ type Config struct {
 	Port     int
 	Username string
 	Password string
+
+	// PinnedHostKey is the SHA256 fingerprint trusted for this host. When set, any other host key
+	// is refused. When empty the first key seen is reported to OnHostKey (trust on first use).
+	PinnedHostKey string
+	OnHostKey     func(fingerprint string)
 }
 
 // LoadConfig reads a single-host SSH target from process environment.

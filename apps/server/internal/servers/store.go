@@ -23,6 +23,10 @@ type Store interface {
 	Delete(ctx context.Context, id string) error
 	GetCredential(ctx context.Context, serverID string) (Credential, error)
 	UpsertCredential(ctx context.Context, cred Credential) error
+	// SetHostKey pins the host key fingerprint if none is pinned yet (trust on first use).
+	SetHostKey(ctx context.Context, id, fingerprint string) error
+	// ClearHostKey forgets the pinned key; the next connection pins again.
+	ClearHostKey(ctx context.Context, id string) error
 }
 
 type SQLStore struct {
@@ -68,10 +72,10 @@ func (s *SQLStore) Create(ctx context.Context, rec Record, cred Credential) erro
 	}
 	defer func() { _ = tx.Rollback() }()
 	_, err = tx.ExecContext(ctx, s.q(`
-		INSERT INTO servers (id, name, host, port, username, auth_type, status, last_error, last_seen, created_at, updated_at, icon_id, custom_icon)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		INSERT INTO servers (id, name, host, port, username, auth_type, status, last_error, last_seen, created_at, updated_at, icon_id, custom_icon, host_key)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 	`), rec.ID, rec.Name, rec.Host, rec.Port, rec.Username, rec.AuthType, rec.Status, rec.LastError,
-		s.timeArg(rec.LastSeen), s.timeArg(rec.CreatedAt), s.timeArg(rec.UpdatedAt), rec.IconID, rec.CustomIcon)
+		s.timeArg(rec.LastSeen), s.timeArg(rec.CreatedAt), s.timeArg(rec.UpdatedAt), rec.IconID, rec.CustomIcon, rec.HostKey)
 	if err != nil {
 		return err
 	}
@@ -88,7 +92,7 @@ func (s *SQLStore) Create(ctx context.Context, rec Record, cred Credential) erro
 
 func (s *SQLStore) Get(ctx context.Context, id string) (Record, error) {
 	row := s.db.QueryRowContext(ctx, s.q(`
-		SELECT id, name, host, port, username, auth_type, status, last_error, last_seen, created_at, updated_at, icon_id, custom_icon
+		SELECT id, name, host, port, username, auth_type, status, last_error, last_seen, created_at, updated_at, icon_id, custom_icon, host_key
 		FROM servers WHERE id = $1
 	`), id)
 	rec, err := s.scanRecord(row)
@@ -100,7 +104,7 @@ func (s *SQLStore) Get(ctx context.Context, id string) (Record, error) {
 
 func (s *SQLStore) List(ctx context.Context) ([]Record, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, host, port, username, auth_type, status, last_error, last_seen, created_at, updated_at, icon_id, custom_icon
+		SELECT id, name, host, port, username, auth_type, status, last_error, last_seen, created_at, updated_at, icon_id, custom_icon, host_key
 		FROM servers ORDER BY created_at ASC
 	`)
 	if err != nil {
@@ -185,6 +189,17 @@ func (s *SQLStore) UpsertCredential(ctx context.Context, cred Credential) error 
 	return err
 }
 
+// SetHostKey only writes when no key is pinned, so a concurrent first connection cannot replace one.
+func (s *SQLStore) SetHostKey(ctx context.Context, id, fingerprint string) error {
+	_, err := s.db.ExecContext(ctx, s.q(`UPDATE servers SET host_key=$2 WHERE id=$1 AND host_key=''`), id, fingerprint)
+	return err
+}
+
+func (s *SQLStore) ClearHostKey(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, s.q(`UPDATE servers SET host_key='' WHERE id=$1`), id)
+	return err
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -211,7 +226,7 @@ func (s *SQLStore) timeArg(v any) any {
 func (s *SQLStore) scanRecord(row rowScanner) (Record, error) {
 	var rec Record
 	var lastSeen, created, updated any
-	err := row.Scan(&rec.ID, &rec.Name, &rec.Host, &rec.Port, &rec.Username, &rec.AuthType, &rec.Status, &rec.LastError, &lastSeen, &created, &updated, &rec.IconID, &rec.CustomIcon)
+	err := row.Scan(&rec.ID, &rec.Name, &rec.Host, &rec.Port, &rec.Username, &rec.AuthType, &rec.Status, &rec.LastError, &lastSeen, &created, &updated, &rec.IconID, &rec.CustomIcon, &rec.HostKey)
 	if err != nil {
 		return Record{}, err
 	}

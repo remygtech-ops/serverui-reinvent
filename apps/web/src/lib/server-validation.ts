@@ -18,6 +18,8 @@ export type ValidationContext = {
   editing: boolean;
   /** Auth method of the saved server; switching it requires a new secret. */
   savedAuth?: AuthMethod;
+  /** Destination the saved secret belongs to. Changing it requires a new secret. */
+  saved?: { host: string; port: number; username: string };
 };
 
 /** "save" checks every field; "connection" skips the name (Test Connection). */
@@ -99,20 +101,37 @@ export function nameError(raw: string): string | null {
   return null;
 }
 
+const MOVED_MESSAGE = {
+  password:
+    "Enter the password again: the host, port or username changed, and a saved password is only used for the original destination.",
+  private_key:
+    "Paste the private key again: the host, port or username changed, and a saved key is only used for the original destination.",
+} as const;
+
 function secretError(values: ServerFormValues, ctx: ValidationContext): string | null {
   const password = values.password.trim();
   const key = values.privateKey.trim();
   const switching = ctx.editing && ctx.savedAuth !== values.auth;
-  // A new secret is needed when adding, or when changing the auth method.
-  const required = !ctx.editing || switching;
+  const moved =
+    ctx.editing &&
+    !switching &&
+    ctx.saved !== undefined &&
+    (values.host.trim().toLowerCase() !== ctx.saved.host.toLowerCase() ||
+      Number(values.port) !== ctx.saved.port ||
+      values.username.trim() !== ctx.saved.username);
+  // A new secret is needed when adding, when changing the auth method, or when the host, port
+  // or username change: a saved secret is only ever used for the destination it was saved for.
+  const required = !ctx.editing || switching || moved;
   if (values.auth === "password") {
     if (password || !required) return null;
+    if (moved) return MOVED_MESSAGE.password;
     return switching
       ? "Enter a password to switch to password authentication."
       : "Password is required.";
   }
   if (!key) {
     if (!required) return null;
+    if (moved) return MOVED_MESSAGE.private_key;
     return switching
       ? "Paste a private key to switch to key authentication."
       : "Private key is required.";

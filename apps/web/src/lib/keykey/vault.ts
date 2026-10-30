@@ -25,6 +25,8 @@ type Envelope = {
 
 export const VAULT_KEY = "serverui-keykey";
 export const PBKDF2_ITERATIONS = 310_000;
+/** Accepted range for a stored envelope: weaker or absurdly heavy settings mean it was tampered with. */
+const MAX_ITERATIONS = 5_000_000;
 
 export class WrongMasterPasswordError extends Error {
   constructor() {
@@ -157,6 +159,9 @@ export async function createVault(master: string): Promise<VaultSession> {
 export async function unlockVault(master: string): Promise<VaultSession> {
   const envelope = readEnvelope();
   if (!envelope) throw new Error("No vault yet.");
+  if (envelope.iterations < PBKDF2_ITERATIONS || envelope.iterations > MAX_ITERATIONS) {
+    throw new Error("The vault has unexpected key derivation settings and was not opened.");
+  }
   const salt = fromBase64(envelope.salt);
   const key = await deriveKey(master, salt, envelope.iterations);
   let plain: ArrayBuffer;

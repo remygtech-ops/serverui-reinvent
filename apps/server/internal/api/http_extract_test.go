@@ -10,7 +10,7 @@ import (
 func TestExtractRequiresKnownServer(t *testing.T) {
 	handler := testAPI(t)
 	body := `{"serverId":"missing","path":"/srv/site.zip","mode":"here"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/files/extract", strings.NewReader(body))
+	req := newJSONRequest(http.MethodPost, "/api/files/extract", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -31,6 +31,9 @@ func TestExtractJobEndpointsReturnNotFound(t *testing.T) {
 	}
 	for _, tc := range cases {
 		req := httptest.NewRequest(tc.method, tc.url, strings.NewReader(tc.body))
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotFound {

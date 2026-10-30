@@ -41,6 +41,15 @@ describe("KeyKey vault", () => {
     await expect(unlockVault("wrong")).rejects.toBeInstanceOf(WrongMasterPasswordError);
   });
 
+  it("refuses an envelope whose key derivation was weakened or inflated", async () => {
+    await createVault("correct horse");
+    const envelope = JSON.parse(localStorage.getItem(VAULT_KEY) ?? "{}");
+    for (const iterations of [1, 1_000, 50_000_000]) {
+      localStorage.setItem(VAULT_KEY, JSON.stringify({ ...envelope, iterations }));
+      await expect(unlockVault("correct horse")).rejects.toThrow(/key derivation settings/);
+    }
+  });
+
   it("re-encrypts under a new master password", async () => {
     const session = await createVault("old master");
     await session.save([item]);

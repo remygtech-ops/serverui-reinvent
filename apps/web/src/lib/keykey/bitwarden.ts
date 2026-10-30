@@ -32,6 +32,12 @@ export async function bitwardenStatus(base: string): Promise<BitwardenState> {
 }
 
 export async function bitwardenUnlock(base: string, master: string) {
+  // Only send the master password to something that answers like the Bitwarden CLI. Any local
+  // process can listen on the port, and a wrong answer here means it is not bw serve.
+  const state = await bitwardenStatus(base);
+  if (state === "unauthenticated") {
+    throw new Error("The Bitwarden CLI is not logged in. Run: bw login");
+  }
   await call(base, "/unlock", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

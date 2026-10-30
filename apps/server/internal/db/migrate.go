@@ -17,7 +17,8 @@ var schemaFS embed.FS
 // Version 1: servers + server_credentials (+ schema_migrations bookkeeping).
 // Version 2: servers.logo, kept so older databases still open.
 // Version 3: servers.icon_id and servers.custom_icon. Icon bytes live on disk.
-const CurrentSchemaVersion = 3
+// Version 4: servers.host_key, the pinned SSH host key fingerprint (trust on first use).
+const CurrentSchemaVersion = 4
 
 // Migrate applies pending schema migrations for the active storage backend.
 // It never drops user tables or recreates the database.
@@ -62,6 +63,12 @@ func MigrateBackend(ctx context.Context, sqlDB *sql.DB, backend StorageBackend) 
 			return err
 		}
 		if err := ensureTextColumn(ctx, sqlDB, backend, "custom_icon", "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+
+	if applied < 4 {
+		if err := ensureTextColumn(ctx, sqlDB, backend, "host_key", "TEXT NOT NULL DEFAULT ''"); err != nil {
 			return err
 		}
 	}

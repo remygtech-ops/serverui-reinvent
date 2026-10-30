@@ -185,3 +185,32 @@ func TestUnsafeErrorTruncatesLongNames(t *testing.T) {
 		t.Fatalf("message too long: %d", len(err.Error()))
 	}
 }
+
+func TestParseTarListingRejectsShiftedColumns(t *testing.T) {
+	// A tar header can carry an owner name with spaces; GNU tar prints it raw, which shifts
+	// every column. The listing must be refused, not mis-parsed (symlink name "-> /abs").
+	out := "lrwxrwxrwx a b c/g 0 2024-01-01 00:00 n -> /etc\n-rw-r--r-- a b c/g 3 2024-01-01 00:00 n/y z\n"
+	if _, err := ParseTarListing(out); err == nil {
+		t.Fatal("shifted columns must be rejected")
+	}
+	// A symlink line without its target cannot be vetted.
+	if _, err := ParseTarListing("lrwxrwxrwx root/root 0 2024-01-01 00:00 lonely\n"); err == nil {
+		t.Fatal("symlink without target must be rejected")
+	}
+}
+
+func TestInspectRejectsSymlinkChains(t *testing.T) {
+	_, err := Inspect([]Entry{
+		{Name: "sub/up", Kind: KindSymlink, Link: ".."},
+		{Name: "x", Kind: KindSymlink, Link: "sub/up/../.."},
+	})
+	if err == nil {
+		t.Fatal("a symlink that resolves through another symlink must be rejected")
+	}
+	if _, err := Inspect([]Entry{
+		{Name: "lib/a", Kind: KindFile},
+		{Name: "lib/b", Kind: KindSymlink, Link: "a"},
+	}); err != nil {
+		t.Fatalf("plain relative symlink must pass: %v", err)
+	}
+}
