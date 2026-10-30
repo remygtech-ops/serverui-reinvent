@@ -55,16 +55,18 @@ pub fn run() {
 
             // Windows only: small purple badge on the taskbar button (not on the window icon).
             #[cfg(target_os = "windows")]
-            if let Some(window) = app.get_webview_window("main") {
-                apply_taskbar_badge(&window);
-                let badge_window = window.clone();
-                window.on_window_event(move |event| {
-                    // Re-apply when the window regains focus, in case the taskbar button
-                    // was not ready yet at start-up or was recreated by Explorer.
-                    if let tauri::WindowEvent::Focused(true) = event {
-                        apply_taskbar_badge(&badge_window);
-                    }
-                });
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    apply_taskbar_badge(&window);
+                    let badge_window = window.clone();
+                    window.on_window_event(move |event| {
+                        // Re-apply when the window regains focus, in case the taskbar button
+                        // was not ready yet at start-up or was recreated by Explorer.
+                        if let tauri::WindowEvent::Focused(true) = event {
+                            apply_taskbar_badge(&badge_window);
+                        }
+                    });
+                }
             }
 
             let mgr = Arc::clone(&manager_for_setup);
