@@ -8,6 +8,7 @@ import { wsUrl } from "@/src/lib/api/origin";
 import { getInjectedDesktopConfig, localAuthWSProtocols } from "@/src/lib/runtime/config";
 import { ServerIcon } from "@/src/components/servers/ServerIcon";
 import { useSession } from "@/src/lib/session";
+import { listenForTerminalInput, takePendingTerminalInput } from "@/src/lib/terminal-bus";
 import { isSampleServer } from "@/src/lib/sample-servers";
 import type { Server } from "@/src/lib/servers";
 
@@ -356,6 +357,20 @@ function TerminalSession({
       terminal?.dispose();
     };
   }, [nonce, server.connected, serverId]);
+
+  // Text sent by other apps (Snippets...) goes to the visible session only.
+  useEffect(() => {
+    if (!active || status !== "connected") return;
+    const send = (text: string, run?: boolean) => {
+      const socket = socketRef.current;
+      if (socket?.readyState !== WebSocket.OPEN) return false;
+      socket.send(new TextEncoder().encode(run ? `${text}\n` : text));
+      return true;
+    };
+    const queued = takePendingTerminalInput();
+    if (queued) send(queued.text, queued.run);
+    return listenForTerminalInput((input) => send(input.text, input.run));
+  }, [active, status]);
 
   useEffect(() => {
     if (status !== "connected" || !cwd || !socketRef.current) return;
