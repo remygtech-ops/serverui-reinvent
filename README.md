@@ -25,12 +25,12 @@ a Go backend stores encrypted credentials and dials each host over plain SSH.
 **Latest release: [ServerUI 0.3.0](https://github.com/rakhechashubham/serverui/releases/tag/v0.3.0).**
 No need to build from source.
 
-| Platform | Installer |
-| -------- | --------- |
-| macOS (Apple Silicon) | [ServerUI-0.3.0-arm64.dmg](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-arm64.dmg) |
-| macOS (Intel) | [ServerUI-0.3.0-x64.dmg](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-x64.dmg) |
-| Windows x64 | [ServerUI-0.3.0-x64-setup.exe](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-x64-setup.exe) or [.msi](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-x64.msi) |
-| Linux x64 | [AppImage](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-x86_64.AppImage) or [.deb](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-amd64.deb) |
+| Platform              | Installer                                                                                                                                                                                                                                |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS (Apple Silicon) | [ServerUI-0.3.0-arm64.dmg](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-arm64.dmg)                                                                                                                |
+| macOS (Intel)         | [ServerUI-0.3.0-x64.dmg](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-x64.dmg)                                                                                                                    |
+| Windows x64           | [ServerUI-0.3.0-x64-setup.exe](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-x64-setup.exe) or [.msi](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-x64.msi) |
+| Linux x64             | [AppImage](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-x86_64.AppImage) or [.deb](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/ServerUI-0.3.0-amd64.deb)                 |
 
 Verify downloads with the release's
 [SHA256SUMS](https://github.com/rakhechashubham/serverui/releases/download/v0.3.0/SHA256SUMS)
@@ -186,17 +186,17 @@ serverui/
 
 Verified against this repository:
 
-| Tool    | Version used in development |
-| ------- | --------------------------- |
-| Git     | any recent                  |
-| Docker  | 28.x (Compose v2)           |
-| Node.js | 22.x                        |
-| npm     | 10.x                        |
-| Go      | 1.26                        |
-| Rust    | stable (MSRV 1.77+) for desktop |
-| Make    | GNU Make                    |
-| OpenSSL | for generating the encryption key |
-| lazydocker | required for `make dev` |
+| Tool       | Version used in development       |
+| ---------- | --------------------------------- |
+| Git        | any recent                        |
+| Docker     | 28.x (Compose v2)                 |
+| Node.js    | 22.x                              |
+| npm        | 10.x                              |
+| Go         | 1.26                              |
+| Rust       | stable (MSRV 1.77+) for desktop   |
+| Make       | GNU Make                          |
+| OpenSSL    | for generating the encryption key |
+| lazydocker | required for `make dev`           |
 
 Docker Desktop (or equivalent) must be running for `make start` and `make dev`.
 
@@ -232,18 +232,18 @@ when you choose **Connect**.
 Canonical file: `.env.example` (copy to `.env`). Compose also accepts
 `deploy/docker/.env`.
 
-| Category | Variable | Purpose |
-| -------- | -------- | ------- |
-| Runtime | `HTTP_PORT` | Host port for the Go API |
-| Runtime | `WEB_PORT` | Host port for the web UI |
-| Database | `POSTGRES_USER` | PostgreSQL user |
-| Database | `POSTGRES_PASSWORD` | PostgreSQL password (local only) |
-| Database | `POSTGRES_DB` | Database name |
-| Database | `POSTGRES_HOST` | Optional; defaults to `127.0.0.1` natively; Compose sets `postgres` |
-| Database | `DATABASE_URL` | Optional DSN; `POSTGRES_*` is enough in Compose |
-| Credentials | `SERVERUI_CREDENTIAL_ENCRYPTION_KEY` | 32-byte key as 64 hex chars (backend only) |
-| API (optional) | `NEXT_PUBLIC_API_BASE` | Browser-facing Go API origin when not same-origin |
-| Deployment | `SERVER_INTERNAL_URL` | Next.js server-side rewrite target (Compose sets this) |
+| Category       | Variable                             | Purpose                                                             |
+| -------------- | ------------------------------------ | ------------------------------------------------------------------- |
+| Runtime        | `HTTP_PORT`                          | Host port for the Go API                                            |
+| Runtime        | `WEB_PORT`                           | Host port for the web UI                                            |
+| Database       | `POSTGRES_USER`                      | PostgreSQL user                                                     |
+| Database       | `POSTGRES_PASSWORD`                  | PostgreSQL password (local only)                                    |
+| Database       | `POSTGRES_DB`                        | Database name                                                       |
+| Database       | `POSTGRES_HOST`                      | Optional; defaults to `127.0.0.1` natively; Compose sets `postgres` |
+| Database       | `DATABASE_URL`                       | Optional DSN; `POSTGRES_*` is enough in Compose                     |
+| Credentials    | `SERVERUI_CREDENTIAL_ENCRYPTION_KEY` | 32-byte key as 64 hex chars (backend only)                          |
+| API (optional) | `NEXT_PUBLIC_API_BASE`               | Browser-facing Go API origin when not same-origin                   |
+| Deployment     | `SERVER_INTERNAL_URL`                | Next.js server-side rewrite target (Compose sets this)              |
 
 Generate a key:
 
