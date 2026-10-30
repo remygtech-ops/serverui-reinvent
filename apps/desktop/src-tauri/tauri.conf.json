@@ -59,10 +59,19 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "startMenuFolder": "ServerUI"
+        "startMenuFolder": "ServerUI",
+        "installerIcon": "icons/icon.ico",
+        "languages": [
+          "French",
+          "English"
+        ],
+        "displayLanguageSelector": true
       },
       "wix": {
-        "language": "en-US"
+        "language": [
+          "fr-FR",
+          "en-US"
+        ]
       }
     },
     "linux": {
