@@ -60,7 +60,7 @@ func (s *Service) TestDraft(ctx context.Context, serverID string, input Input) (
 
 func (in Input) secretValue() string {
 	if in.AuthType == AuthPrivateKey {
-		return in.PrivateKey
+		return packKey(in.PrivateKey, in.Passphrase)
 	}
 	return in.Password
 }

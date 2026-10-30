@@ -452,10 +452,10 @@ func (s *Service) suppliedSecret(authType string, supplied Secret) (string, erro
 		if key == "" {
 			return "", fmt.Errorf("private key is required")
 		}
-		if _, err := sshx.ParsePrivateKeyAuth(key, ""); err != nil {
+		if _, err := sshx.ParsePrivateKeyAuth(key, supplied.Passphrase); err != nil {
 			return "", err
 		}
-		return key, nil
+		return packKey(key, supplied.Passphrase), nil
 	default:
 		return "", fmt.Errorf("invalid authentication type")
 	}
@@ -491,10 +491,10 @@ func (s *Service) secret(input Input, required bool) (string, error) {
 		if required && input.PrivateKey == "" {
 			return "", fmt.Errorf("private key is required")
 		}
-		if _, err := sshx.ParsePrivateKeyAuth(input.PrivateKey, ""); err != nil {
+		if _, err := sshx.ParsePrivateKeyAuth(input.PrivateKey, input.Passphrase); err != nil {
 			return "", err
 		}
-		return input.PrivateKey, nil
+		return packKey(input.PrivateKey, input.Passphrase), nil
 	default:
 		return "", fmt.Errorf("invalid authentication type")
 	}
@@ -550,7 +550,8 @@ func authMethod(authType, secret string) (sshx.AuthMethod, error) {
 	case AuthPassword:
 		return sshx.PasswordAuth{Password: secret}, nil
 	case AuthPrivateKey:
-		return sshx.ParsePrivateKeyAuth(secret, "")
+		key, passphrase := unpackKey(secret)
+		return sshx.ParsePrivateKeyAuth(key, passphrase)
 	default:
 		return nil, fmt.Errorf("invalid authentication type")
 	}

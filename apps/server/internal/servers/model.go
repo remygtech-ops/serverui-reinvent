@@ -49,6 +49,8 @@ type Input struct {
 	AuthType   string
 	Password   string
 	PrivateKey string
+	// Passphrase unlocks an encrypted private key. Optional.
+	Passphrase string
 	IconID     string
 	// SaveCredentials controls whether the password/key is stored (encrypted). Nil means yes.
 	// When false the secret is only kept in memory for the running session.
@@ -106,4 +108,5 @@ func (i Input) saveCredentials() bool {
 type Secret struct {
 	Password   string
 	PrivateKey string
+	Passphrase string
 }

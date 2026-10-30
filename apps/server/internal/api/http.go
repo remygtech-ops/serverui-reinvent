@@ -116,6 +116,7 @@ type serverBody struct {
 	AuthType   string  `json:"authType"`
 	Password   string  `json:"password"`
 	PrivateKey string  `json:"privateKey"`
+	Passphrase string  `json:"passphrase"`
 	IconID     string  `json:"iconId"`
 	IconImage  *string `json:"iconImage"`
 	// SaveCredentials is optional; omitted means the password/key is stored (encrypted).
@@ -131,6 +132,7 @@ func (b serverBody) input() servers.Input {
 		AuthType:   b.AuthType,
 		Password:   b.Password,
 		PrivateKey: b.PrivateKey,
+		Passphrase: b.Passphrase,
 		IconID:     b.IconID,
 		IconImage:  b.IconImage,
 
@@ -244,6 +246,7 @@ func (s *Server) testServerDraft(w http.ResponseWriter, r *http.Request) {
 type connectBody struct {
 	Password   string `json:"password"`
 	PrivateKey string `json:"privateKey"`
+	Passphrase string `json:"passphrase"`
 }
 
 func (s *Server) connectServer(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +258,7 @@ func (s *Server) connectServer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if body.Password != "" || body.PrivateKey != "" {
-			supplied = &servers.Secret{Password: body.Password, PrivateKey: body.PrivateKey}
+			supplied = &servers.Secret{Password: body.Password, PrivateKey: body.PrivateKey, Passphrase: body.Passphrase}
 		}
 	}
 	item, err := s.servers.Connect(r.Context(), r.PathValue("id"), supplied)
@@ -1079,7 +1082,7 @@ func writeError(w http.ResponseWriter, err error) {
 		code = http.StatusNotFound
 	case strings.Contains(msg, "permission denied"):
 		code = http.StatusForbidden
-	case strings.Contains(msg, "passphrase-protected"):
+	case strings.Contains(msg, "passphrase"):
 		code = http.StatusBadRequest
 	case strings.Contains(msg, "authenticate"),
 		strings.Contains(msg, "authentication"),

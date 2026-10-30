@@ -2,11 +2,16 @@ package servers
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 
 	"serverui/server/internal/crypto"
 	sshx "serverui/server/internal/ssh"
@@ -312,5 +317,67 @@ func TestConnectWithSuppliedSecret(t *testing.T) {
 	}
 	if _, err := fresh.Connect(ctx, created.ID, nil); !errors.Is(err, ErrSecretRequired) {
 		t.Fatalf("want ErrSecretRequired, got %v", err)
+	}
+}
+
+func encryptedKey(t *testing.T, passphrase string) string {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "test", []byte(passphrase))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(block))
+}
+
+func TestPassphraseProtectedKeyIsStoredAndUsed(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	key := encryptedKey(t, "correct horse")
+	base := Input{
+		Name: "Key box", Host: "203.0.113.30", Port: 22, Username: "me",
+		AuthType: AuthPrivateKey, PrivateKey: key,
+	}
+
+	if _, err := svc.Create(ctx, base); err == nil || !strings.Contains(err.Error(), "passphrase") {
+		t.Fatalf("missing passphrase should be reported, got %v", err)
+	}
+	wrong := base
+	wrong.Passphrase = "wrong"
+	if _, err := svc.Create(ctx, wrong); err == nil || !strings.Contains(err.Error(), "passphrase") {
+		t.Fatalf("wrong passphrase should be reported, got %v", err)
+	}
+
+	good := base
+	good.Passphrase = "correct horse"
+	created, err := svc.Create(ctx, good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A fresh service reads the stored secret back, passphrase included.
+	fresh := NewService(svc.store, svc.box)
+	if _, _, err := fresh.loadAuth(created.ID); err != nil {
+		t.Fatalf("stored key and passphrase should load: %v", err)
+	}
+	cred, _ := svc.store.GetCredential(ctx, created.ID)
+	if plain, _ := svc.box.Decrypt(cred.EncryptedSecret); strings.Contains(string(plain), "correct horse") == false {
+		t.Fatal("passphrase should be part of the encrypted secret")
+	}
+}
+
+func TestPlainKeysKeepTheirOldStoredForm(t *testing.T) {
+	if packKey("-----BEGIN KEY-----", "") != "-----BEGIN KEY-----" {
+		t.Fatal("keys without a passphrase must stay plain")
+	}
+	key, pass := unpackKey("-----BEGIN KEY-----")
+	if key != "-----BEGIN KEY-----" || pass != "" {
+		t.Fatalf("unpack plain: %q %q", key, pass)
+	}
+	key, pass = unpackKey(packKey("KEYDATA", "pw"))
+	if key != "KEYDATA" || pass != "pw" {
+		t.Fatalf("unpack packed: %q %q", key, pass)
 	}
 }

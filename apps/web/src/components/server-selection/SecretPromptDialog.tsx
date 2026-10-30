@@ -6,7 +6,7 @@ import { KeyRound, X } from "lucide-react";
 import { ServerIcon } from "@/src/components/servers/ServerIcon";
 import type { Server } from "@/src/lib/servers";
 
-export type SecretInput = { password?: string; privateKey?: string };
+export type SecretInput = { password?: string; privateKey?: string; passphrase?: string };
 
 /**
  * Asked when a server was saved without its password/key (Save password off).
@@ -26,6 +26,7 @@ export function SecretPromptDialog({
   const titleId = useId();
   const input = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const [value, setValue] = useState("");
+  const [passphrase, setPassphrase] = useState("");
   const isKey = server.authType === "private_key";
 
   useEffect(() => {
@@ -36,7 +37,9 @@ export function SecretPromptDialog({
     event.preventDefault();
     const secret = value.trim();
     if (!secret) return;
-    onSubmit(isKey ? { privateKey: secret } : { password: secret });
+    onSubmit(
+      isKey ? { privateKey: secret, passphrase: passphrase || undefined } : { password: secret },
+    );
   }
 
   return (
@@ -105,6 +108,17 @@ export function SecretPromptDialog({
               />
             </div>
           )}
+          {isKey ? (
+            <input
+              type="password"
+              aria-label="Key passphrase"
+              value={passphrase}
+              onChange={(event) => setPassphrase(event.target.value)}
+              className="sui-server-input"
+              placeholder="Key passphrase (if any)"
+              autoComplete="off"
+            />
+          ) : null}
           {error ? (
             <p className="text-[12px] text-red-500" role="alert">
               {error}

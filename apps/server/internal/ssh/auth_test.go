@@ -32,7 +32,7 @@ func TestParsePrivateKeyAuthRejectsEmpty(t *testing.T) {
 	}
 }
 
-func TestParsePrivateKeyAuthRejectsPassphraseProtected(t *testing.T) {
+func TestParsePrivateKeyAuthAsksForThePassphrase(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -43,8 +43,14 @@ func TestParsePrivateKeyAuthRejectsPassphraseProtected(t *testing.T) {
 	}
 	pemBytes := pem.EncodeToMemory(block)
 	_, err = ParsePrivateKeyAuth(string(pemBytes), "")
-	if err == nil || !strings.Contains(err.Error(), "not supported") {
+	if err == nil || !strings.Contains(err.Error(), "requires a passphrase") {
 		t.Fatalf("got %v", err)
+	}
+	if _, err = ParsePrivateKeyAuth(string(pemBytes), "wrong"); err == nil || !strings.Contains(err.Error(), "incorrect passphrase") {
+		t.Fatalf("wrong passphrase: %v", err)
+	}
+	if _, err = ParsePrivateKeyAuth(string(pemBytes), "phrase"); err != nil {
+		t.Fatalf("right passphrase: %v", err)
 	}
 }
 

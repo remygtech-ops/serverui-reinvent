@@ -119,6 +119,7 @@ function toWriteInput(input: NewServerInput) {
     authType: input.authType,
     password: input.password,
     privateKey: input.privateKey,
+    ...(input.passphrase ? { passphrase: input.passphrase } : {}),
     ...(input.saveCredentials !== undefined ? { saveCredentials: input.saveCredentials } : {}),
     iconId: input.iconId,
     ...(input.iconImage !== undefined ? { iconImage: input.iconImage } : {}),
