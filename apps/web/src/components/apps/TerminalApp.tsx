@@ -15,6 +15,8 @@ function quotePath(value: string) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
+const MAX_AUTO_RETRIES = 4;
+
 type Tab = {
   id: string;
   serverId: string;
@@ -217,6 +219,7 @@ function TerminalSession({
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const retries = useRef(0);
   const serverId = server.id;
   const serverName = server.name;
 
@@ -236,9 +239,21 @@ function TerminalSession({
     if (!container) return;
 
     let disposed = false;
+    let retryTimer: number | undefined;
     let socket: WebSocket | null = null;
     let terminal: import("@xterm/xterm").Terminal | null = null;
     let observer: ResizeObserver | null = null;
+
+    // A dropped session reconnects on its own a few times (1.5s, 3s, 4.5s...) before asking the user.
+    function scheduleRetry() {
+      if (disposed || retryTimer !== undefined || retries.current >= MAX_AUTO_RETRIES) return false;
+      retries.current += 1;
+      const attempt = retries.current;
+      setStatus("connecting");
+      setError(`Connection lost. Reconnecting (${attempt}/${MAX_AUTO_RETRIES})…`);
+      retryTimer = window.setTimeout(() => setNonce((value) => value + 1), 1500 * attempt);
+      return true;
+    }
 
     async function connect() {
       try {
@@ -284,6 +299,7 @@ function TerminalSession({
         socket.onopen = () => {
           window.clearTimeout(timeout);
           if (!terminal) return;
+          retries.current = 0;
           setStatus("connected");
           setError(null);
           fitAddon.fit();
@@ -317,12 +333,14 @@ function TerminalSession({
         socket.onerror = () => {
           window.clearTimeout(timeout);
           if (disposed) return;
+          if (scheduleRetry()) return;
           setError("Terminal disconnected. Reconnect when the server is available.");
           setStatus("disconnected");
         };
         socket.onclose = () => {
           window.clearTimeout(timeout);
           if (disposed) return;
+          if (scheduleRetry()) return;
           setStatus("disconnected");
         };
 
@@ -348,6 +366,7 @@ function TerminalSession({
 
     return () => {
       disposed = true;
+      window.clearTimeout(retryTimer);
       observer?.disconnect();
       socket?.close();
       socketRef.current = null;
@@ -406,7 +425,7 @@ function TerminalSession({
       <div className="flex items-center justify-between gap-3 px-3 py-2 text-[11px] text-white/70">
         <span>
           {status === "connecting"
-            ? `Connecting to ${serverName}…`
+            ? error || `Connecting to ${serverName}…`
             : status === "connected"
               ? `Connected to ${serverName}`
               : error || "Terminal disconnected"}
@@ -416,6 +435,7 @@ function TerminalSession({
             type="button"
             className="rounded-md bg-white/10 px-2 py-1 text-white outline-none hover:bg-white/15 focus-visible:ring-2 focus-visible:ring-emerald-400"
             onClick={() => {
+              retries.current = 0;
               setStatus("connecting");
               setError(null);
               setNonce((value) => value + 1);
