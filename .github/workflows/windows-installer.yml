@@ -3,13 +3,14 @@ name: Windows Installer
 # Builds the Windows NSIS installer and publishes it as a GitHub Release.
 # The tag (v<version from tauri.conf.json>) is created by the release step itself,
 # so no manual `git tag` / `git push --tags` is needed.
-# Runs when this file changes on main, or manually from the Actions tab.
+# Runs when this file or the app version (tauri.conf.json) changes on main, or manually from the Actions tab.
 
 on:
   push:
     branches: [main]
     paths:
       - ".github/workflows/windows-installer.yml"
+      - "apps/desktop/src-tauri/tauri.conf.json"
   workflow_dispatch:
 
 permissions:

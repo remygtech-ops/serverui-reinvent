@@ -1,4 +1,3 @@
-use keyring::Entry;
 use rand::RngCore;
 use std::fs;
 use std::io::Write;
@@ -20,15 +19,10 @@ pub fn resolve_encryption_key(
     env_fallback: Option<&str>,
     data_dir: &Path,
 ) -> Result<String, String> {
-    let entry = Entry::new(SERVICE, ACCOUNT).ok();
     let env_key = env_fallback.map(str::trim).filter(|v| !v.is_empty());
 
-    if let Some(entry) = entry.as_ref() {
-        if let Ok(existing) = entry.get_password() {
-            if !existing.trim().is_empty() {
-                return Ok(existing.trim().to_string());
-            }
-        }
+    if let Some(existing) = keychain_get() {
+        return Ok(existing);
     }
 
     // A key file written by an earlier launch (keychain unavailable then) keeps being used.
@@ -41,20 +35,42 @@ pub fn resolve_encryption_key(
         None => random_hex_key(),
     };
 
-    if let Some(entry) = entry.as_ref() {
-        // Some Linux setups accept the write but lose it, so read it back before trusting it.
-        if entry.set_password(&key).is_ok()
-            && entry
-                .get_password()
-                .map(|stored| stored.trim() == key)
-                .unwrap_or(false)
-        {
-            return Ok(key);
-        }
+    // Read it back through a fresh entry before trusting it: a store that accepts the write
+    // but does not persist it would otherwise lose the key at the next launch.
+    if keychain_set(&key) && keychain_get().as_deref() == Some(key.as_str()) {
+        return Ok(key);
     }
 
     write_key_file(data_dir, &key)?;
     Ok(key)
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn keychain_get() -> Option<String> {
+    let value = keyring::Entry::new(SERVICE, ACCOUNT)
+        .ok()?
+        .get_password()
+        .ok()?;
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn keychain_set(key: &str) -> bool {
+    keyring::Entry::new(SERVICE, ACCOUNT)
+        .and_then(|entry| entry.set_password(key))
+        .is_ok()
+}
+
+// Linux: no OS keychain dependency, the key file in the app data directory is used.
+#[cfg(not(any(windows, target_os = "macos")))]
+fn keychain_get() -> Option<String> {
+    None
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn keychain_set(_key: &str) -> bool {
+    false
 }
 
 fn read_key_file(data_dir: &Path) -> Option<String> {

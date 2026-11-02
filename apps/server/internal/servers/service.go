@@ -460,7 +460,10 @@ func (s *Service) savedAuth(ctx context.Context, rec Record) (sshx.AuthMethod, e
 	}
 	secret, err := s.box.Decrypt(cred.EncryptedSecret)
 	if err != nil {
-		return nil, fmt.Errorf("unable to authenticate")
+		// The encryption key changed since the secret was stored (e.g. a lost keychain entry).
+		// Ask for the password again instead of reporting a misleading authentication failure.
+		log.Printf("server.secret_unreadable id=%s", rec.ID)
+		return nil, ErrSecretRequired
 	}
 	if secret == "" {
 		// Saved without credentials: only a secret entered this session can be used.
