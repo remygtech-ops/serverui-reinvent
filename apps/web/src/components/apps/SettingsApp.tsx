@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 
 import { SecuritySettings } from "@/src/components/apps/settings/SecuritySettings";
 import { TerminalSettings } from "@/src/components/apps/settings/TerminalSettings";
+import { UpdateSettings } from "@/src/components/apps/settings/UpdateSettings";
 import { AppearanceSettings } from "@/src/components/shell/AppearanceSettings";
 import { useAppearance, type AppearanceId } from "@/src/lib/appearance";
 import { useWallpaper, type WallpaperId } from "@/src/lib/wallpaper";
@@ -13,7 +14,9 @@ import { useWallpaper, type WallpaperId } from "@/src/lib/wallpaper";
  * Never displays tokens, encryption keys, passwords, or private keys.
  */
 export function SettingsApp() {
-  const [section, setSection] = useState<"general" | "terminal" | "security">("general");
+  const [section, setSection] = useState<"general" | "terminal" | "security" | "updates">(
+    "general",
+  );
   const {
     wallpaperId,
     wallpaperSrc,
@@ -39,6 +42,7 @@ export function SettingsApp() {
             ["general", "General"],
             ["terminal", "Terminal"],
             ["security", "Security"],
+            ["updates", "Updates"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -58,6 +62,8 @@ export function SettingsApp() {
         <TerminalSettings />
       ) : section === "security" ? (
         <SecuritySettings />
+      ) : section === "updates" ? (
+        <UpdateSettings />
       ) : (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto px-6 py-8">
           <h3 className="text-2xl font-semibold tracking-tight sui-title">General</h3>

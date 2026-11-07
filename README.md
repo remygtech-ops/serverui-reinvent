@@ -43,6 +43,17 @@ L'installeur s'installe par utilisateur (pas besoin des droits administrateur), 
 dans le menu Démarrer, et propose le français ou l'anglais. Sur Windows, l'icône de la barre des
 tâches porte une petite **pastille violette** qui distingue cette version.
 
+### Mise à jour depuis l'application
+
+Une fois installée, l'application se met à jour toute seule : **Paramètres → Mises à jour (Updates) →
+Check for updates**, puis **Install … and restart**. Plus besoin de retélécharger l'installeur, et
+vos serveurs, mots de passe et réglages sont conservés. Les mises à jour sont téléchargées depuis les
+Releases de ce fork et **vérifiées par signature** avant l'installation.
+
+> Pour publier une version qui apparaît dans ce bouton, le dépôt doit avoir le secret GitHub
+> `TAURI_SIGNING_PRIVATE_KEY` (Settings → Secrets and variables → Actions). Sans lui, le workflow
+> publie quand même l'installeur, mais sans `latest.json`, donc invisible pour la mise à jour intégrée.
+
 Les builds macOS et Linux de l'application d'origine restent disponibles sur la
 [page des releases du projet original](https://github.com/rakhechashubham/serverui/releases).
 Voir [docs/releases.md](docs/releases.md).
@@ -94,7 +105,8 @@ Trois passes d'audit ont été menées avec le
 
 ### Installeur et version
 
-- Version **0.3.1**.
+- Version **0.3.3**.
+- **Bouton de mise à jour intégré** (Paramètres → Updates), avec mises à jour signées.
 - Installeur NSIS : installation par utilisateur, dossier du menu Démarrer, icône dédiée, langues
   français / anglais.
 - Pastille violette sur l'icône de la barre des tâches (Windows uniquement).

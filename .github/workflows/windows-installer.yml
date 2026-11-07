@@ -82,18 +82,40 @@ jobs:
 
       - name: Build Tauri app (NSIS installer)
         working-directory: apps/desktop
-        run: npm run build:unsigned -- --bundles nsis
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+            echo "Updater signing key present: building signed updater artifacts"
+            npm run build -- --bundles nsis
+          else
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY secret is missing: building WITHOUT updater artifacts (in-app updates will not see this release)"
+            npm run build:unsigned -- --bundles nsis
+          fi
 
-      - name: Collect installer
+      - name: Collect installer and updater manifest
         run: |
           set -euo pipefail
           mkdir -p dist/publish
           BUNDLE="apps/desktop/src-tauri/target/release/bundle"
           [[ -d "$BUNDLE" ]] || BUNDLE="apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
           SRC="$(ls "$BUNDLE"/nsis/*-setup.exe | head -n 1)"
-          DEST="dist/publish/ServerUI-${{ steps.meta.outputs.version }}-x64-setup.exe"
-          cp "$SRC" "$DEST"
-          (cd dist/publish && sha256sum "$(basename "$DEST")" > SHA256SUMS)
+          NAME="ServerUI-${{ steps.meta.outputs.version }}-x64-setup.exe"
+          cp "$SRC" "dist/publish/$NAME"
+          if [[ -f "$SRC.sig" ]]; then
+            cp "$SRC.sig" "dist/publish/$NAME.sig"
+            node scripts/generate-updater-latest-json.mjs \
+              --version "${{ steps.meta.outputs.version }}" \
+              --tag "v${{ steps.meta.outputs.version }}" \
+              --repo "${{ github.repository }}" \
+              --notes "ServerUI ${{ steps.meta.outputs.version }}" \
+              --dir dist/publish
+          else
+            echo "::warning::No .sig produced: latest.json will not be published"
+          fi
+          (cd dist/publish && sha256sum "$NAME" > SHA256SUMS)
           ls -la dist/publish
           cat dist/publish/SHA256SUMS
 
@@ -110,6 +132,9 @@ jobs:
 
             Download `ServerUI-${{ steps.meta.outputs.version }}-x64-setup.exe` below and run it.
             Verify with `SHA256SUMS` (`certutil -hashfile <file> SHA256`).
+
+            Already installed? Open **Settings → Updates → Check for updates** instead of downloading again.
+            Your servers, passwords and settings are kept.
 
             The installer is **not code-signed**: Windows SmartScreen may warn on first launch
             ("More info" → "Run anyway").
