@@ -7,12 +7,14 @@ import { AppearanceEffects } from "@/src/lib/appearance";
 import { RuntimeProvider } from "@/src/lib/runtime";
 import { SessionProvider } from "@/src/lib/session";
 import { ThemeProvider } from "@/src/lib/theme";
+import { UiZoomController } from "@/src/lib/ui-zoom";
 import { WallpaperProvider } from "@/src/lib/wallpaper";
 
 export function AppShell() {
   return (
     <ThemeProvider>
       <AppearanceEffects />
+      <UiZoomController />
       <WallpaperProvider>
         <RuntimeProvider>
           <SessionProvider>

@@ -19,7 +19,7 @@ export type UpdateCheck =
   | { kind: "up-to-date"; current: string }
   | { kind: "available"; current: string; update: UpdateInfo };
 
-async function inDesktopShell(): Promise<boolean> {
+export async function inDesktopShell(): Promise<boolean> {
   try {
     const { isTauri } = await import("@tauri-apps/api/core");
     return isTauri();

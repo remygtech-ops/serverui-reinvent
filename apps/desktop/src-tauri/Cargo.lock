@@ -3109,7 +3109,7 @@ dependencies = [
 
 [[package]]
 name = "serverui-desktop"
-version = "0.3.3"
+version = "0.3.31"
 dependencies = [
  "keyring",
  "rand",

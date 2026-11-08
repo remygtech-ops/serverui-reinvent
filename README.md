@@ -105,7 +105,10 @@ Trois passes d'audit ont été menées avec le
 
 ### Installeur et version
 
-- Version **0.3.3**.
+- Version **0.3.31**.
+- **Zoom global de l'interface** : Ctrl + molette zoome ou dézoome toutes les fenêtres, le dock et les
+  menus (50 % à 200 %, mémorisé). Réglable aussi dans Paramètres → General. Dans un terminal, Ctrl +
+  molette change toujours uniquement la taille de la police.
 - **Bouton de mise à jour intégré** (Paramètres → Updates), avec mises à jour signées.
 - Installeur NSIS : installation par utilisateur, dossier du menu Démarrer, icône dédiée, langues
   français / anglais.

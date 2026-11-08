@@ -7,6 +7,15 @@ import { TerminalSettings } from "@/src/components/apps/settings/TerminalSetting
 import { UpdateSettings } from "@/src/components/apps/settings/UpdateSettings";
 import { AppearanceSettings } from "@/src/components/shell/AppearanceSettings";
 import { useAppearance, type AppearanceId } from "@/src/lib/appearance";
+import {
+  UI_ZOOM_DEFAULT,
+  UI_ZOOM_MAX,
+  UI_ZOOM_MIN,
+  UI_ZOOM_STEP,
+  useDesktopShell,
+  useUiZoom,
+  writeUiZoom,
+} from "@/src/lib/ui-zoom";
 import { useWallpaper, type WallpaperId } from "@/src/lib/wallpaper";
 
 /**
@@ -30,6 +39,8 @@ export function SettingsApp() {
   const [wallpaperError, setWallpaperError] = useState<string | null>(null);
   const wallpaperInputRef = useRef<HTMLInputElement>(null);
   const { appearance, setAppearance } = useAppearance();
+  const desktop = useDesktopShell();
+  const uiZoom = useUiZoom();
 
   return (
     <div className="flex h-full min-h-0 overflow-hidden sui-app">
@@ -92,6 +103,52 @@ export function SettingsApp() {
             </div>
             {appearance === "aura" ? <AppearanceSettings /> : null}
           </section>
+          {desktop ? (
+            <section
+              className="sui-card mt-6 max-w-2xl space-y-3 rounded-[14px] p-4"
+              aria-label="Interface zoom"
+            >
+              <h4 className="text-sm font-medium sui-title">Interface zoom</h4>
+              <p className="text-sm leading-6 sui-muted">
+                Ctrl + mouse wheel anywhere on the desktop zooms every window, the dock and the
+                menus. In a terminal, Ctrl + wheel still changes the terminal font size only.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  aria-label="Zoom out"
+                  disabled={uiZoom <= UI_ZOOM_MIN}
+                  onClick={() => writeUiZoom(uiZoom - UI_ZOOM_STEP)}
+                  className="rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-sm sui-title hover:bg-white/10 disabled:opacity-50"
+                >
+                  −
+                </button>
+                <span
+                  aria-label="Current zoom"
+                  className="w-14 text-center text-sm tabular-nums sui-title"
+                >
+                  {Math.round(uiZoom * 100)}%
+                </span>
+                <button
+                  type="button"
+                  aria-label="Zoom in"
+                  disabled={uiZoom >= UI_ZOOM_MAX}
+                  onClick={() => writeUiZoom(uiZoom + UI_ZOOM_STEP)}
+                  className="rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-sm sui-title hover:bg-white/10 disabled:opacity-50"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  disabled={uiZoom === UI_ZOOM_DEFAULT}
+                  onClick={() => writeUiZoom(UI_ZOOM_DEFAULT)}
+                  className="rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-sm sui-title hover:bg-white/10 disabled:opacity-50"
+                >
+                  Reset
+                </button>
+              </div>
+            </section>
+          ) : null}
           <section
             className="sui-card mt-6 max-w-2xl space-y-3 rounded-[14px] p-4"
             aria-labelledby="settings-wallpaper"
