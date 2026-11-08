@@ -55,7 +55,7 @@ export async function checkForUpdate(): Promise<UpdateCheck> {
       install: async (onProgress) => {
         let total = 0;
         let received = 0;
-        await found.downloadAndInstall((event) => {
+        await found.download((event) => {
           if (event.event === "Started") {
             total = event.data.contentLength ?? 0;
             onProgress(total > 0 ? 0 : null);
@@ -66,6 +66,11 @@ export async function checkForUpdate(): Promise<UpdateCheck> {
             onProgress(1);
           }
         });
+        // The installer cannot overwrite serverui-server.exe while it runs, so stop the backend
+        // only now that the download succeeded (a failed download leaves the app fully working).
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("stop_backend");
+        await found.install();
       },
     },
   };

@@ -105,7 +105,7 @@ Trois passes d'audit ont été menées avec le
 
 ### Installeur et version
 
-- Version **0.3.31**.
+- Version **0.3.32**.
 - **Zoom global de l'interface** : Ctrl + molette zoome ou dézoome toutes les fenêtres, le dock et les
   menus (50 % à 200 %, mémorisé). Réglable aussi dans Paramètres → General. Dans un terminal, Ctrl +
   molette change toujours uniquement la taille de la police.

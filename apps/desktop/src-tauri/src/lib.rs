@@ -7,7 +7,14 @@ use std::sync::Arc;
 use backend::{BackendManager, RuntimeConfig};
 use tauri::Manager;
 
-/// Sole custom IPC surface for the WebView. Returns runtime status for the local Go API.
+/// Stops the Go backend so an installer can replace `serverui-server` (Windows locks a running
+/// executable). Called right before an in-app update is installed; takes no arguments.
+#[tauri::command]
+fn stop_backend(state: tauri::State<'_, Arc<BackendManager>>) {
+    state.stop();
+}
+
+/// Custom IPC surface for the WebView. Returns runtime status for the local Go API.
 /// Does not accept arguments and never exposes shell/filesystem capabilities.
 #[tauri::command]
 fn get_runtime_config(state: tauri::State<'_, Arc<BackendManager>>) -> RuntimeConfig {
@@ -32,7 +39,7 @@ pub fn run() {
 
     builder
         .manage(manager)
-        .invoke_handler(tauri::generate_handler![get_runtime_config])
+        .invoke_handler(tauri::generate_handler![get_runtime_config, stop_backend])
         .setup(move |app| {
             let resource_dir = app
                 .path()

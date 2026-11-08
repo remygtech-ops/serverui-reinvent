@@ -90,4 +90,27 @@ describe("UpdateSettings", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/signature/i);
     expect(mocked.restartApp).not.toHaveBeenCalled();
   });
+
+  it("offers a restart when the install fails after the download", async () => {
+    mocked.currentVersion.mockResolvedValue("0.3.3");
+    mocked.restartApp.mockResolvedValue();
+    mocked.checkForUpdate.mockResolvedValue({
+      kind: "available",
+      current: "0.3.3",
+      update: {
+        version: "0.4.0",
+        notes: "",
+        install: vi.fn(async (onProgress: (fraction: number | null) => void) => {
+          onProgress(1);
+          throw new Error("installer failed");
+        }),
+      },
+    });
+    render(<UpdateSettings />);
+    await screen.findByText("0.3.3");
+    await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    await userEvent.click(await screen.findByRole("button", { name: /Install 0.4.0/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Restart ServerUI" }));
+    expect(mocked.restartApp).toHaveBeenCalledTimes(1);
+  });
 });

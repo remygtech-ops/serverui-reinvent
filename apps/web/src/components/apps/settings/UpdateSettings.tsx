@@ -17,7 +17,7 @@ type State =
   | { kind: "available"; update: UpdateInfo }
   | { kind: "installing"; update: UpdateInfo; progress: number | null }
   | { kind: "restarting" }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; restart?: boolean };
 
 /** Desktop self-update: check the signed release feed, install, restart. */
 export function UpdateSettings() {
@@ -53,15 +53,20 @@ export function UpdateSettings() {
 
   async function install(update: UpdateInfo) {
     setState({ kind: "installing", update, progress: null });
+    let downloaded = false;
     try {
       await update.install((progress) => {
+        if (progress === 1) downloaded = true;
         if (alive.current) setState({ kind: "installing", update, progress });
       });
       if (!alive.current) return;
       setState({ kind: "restarting" });
       await restartApp();
     } catch (err) {
-      if (alive.current) setState({ kind: "error", message: describeUpdateError(err) });
+      // Once the download is done the backend has been stopped: the app needs a restart.
+      if (alive.current) {
+        setState({ kind: "error", message: describeUpdateError(err), restart: downloaded });
+      }
     }
   }
 
@@ -153,9 +158,20 @@ export function UpdateSettings() {
             ) : null}
 
             {state.kind === "error" ? (
-              <p className="text-sm text-red-300/90" role="alert">
-                {state.message}
-              </p>
+              <div className="space-y-2">
+                <p className="text-sm text-red-300/90" role="alert">
+                  {state.message}
+                </p>
+                {state.restart ? (
+                  <button
+                    type="button"
+                    onClick={() => void restartApp()}
+                    className="rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-sm sui-title hover:bg-white/10"
+                  >
+                    Restart ServerUI
+                  </button>
+                ) : null}
+              </div>
             ) : null}
           </>
         )}
