@@ -74,10 +74,13 @@ type Public struct {
 	Error      string `json:"error,omitempty"`
 	Connected  bool   `json:"connected"`
 	// CredentialsSaved is false when the password/key was not stored and must be entered to connect.
-	CredentialsSaved bool       `json:"credentialsSaved"`
-	LastSeen         *time.Time `json:"lastSeen,omitempty"`
-	CreatedAt        time.Time  `json:"createdAt"`
-	UpdatedAt        time.Time  `json:"updatedAt"`
+	CredentialsSaved bool `json:"credentialsSaved"`
+	// CredentialsLost is true when a secret was stored but can no longer be decrypted, for example
+	// because it was saved by an older version whose encryption key was not kept.
+	CredentialsLost bool       `json:"credentialsLost"`
+	LastSeen        *time.Time `json:"lastSeen,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
 }
 
 func (r Record) Public() Public {
@@ -111,4 +114,6 @@ type Secret struct {
 	Password   string
 	PrivateKey string
 	Passphrase string
+	// Remember stores the secret (encrypted) once the connection succeeds.
+	Remember bool
 }

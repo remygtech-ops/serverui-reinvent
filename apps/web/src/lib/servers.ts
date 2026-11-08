@@ -28,6 +28,8 @@ export type Server = {
   customIcon?: boolean;
   /** False when the password/key is not stored and is asked for at connect time. */
   credentialsSaved?: boolean;
+  /** A stored secret exists but cannot be decrypted (saved by an older version). */
+  credentialsLost?: boolean;
   updatedAt?: string;
   error?: string;
 };

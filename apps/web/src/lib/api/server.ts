@@ -97,6 +97,7 @@ export type ServerInfo = {
   iconId?: string;
   customIcon?: boolean;
   credentialsSaved?: boolean;
+  credentialsLost?: boolean;
   updatedAt?: string;
   cpuUsage: number;
   memoryUsage: number;
@@ -288,7 +289,7 @@ export const SECRET_REQUIRED_STATUS = 428;
 
 export function connectServer(
   id: string,
-  secret?: { password?: string; privateKey?: string; passphrase?: string },
+  secret?: { password?: string; privateKey?: string; passphrase?: string; remember?: boolean },
 ) {
   return apiRequest<ServerInfo>(`/api/servers/${id}/connect`, {
     method: "POST",

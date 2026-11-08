@@ -105,7 +105,10 @@ Trois passes d'audit ont été menées avec le
 
 ### Installeur et version
 
-- Version **0.3.32**.
+- Version **0.3.33**.
+- **Mot de passe illisible réparé** : si un mot de passe enregistré par une ancienne version ne peut plus
+  être lu, la fenêtre de connexion le dit et propose de le **mémoriser** (chiffré) après une connexion
+  réussie, au lieu de le redemander à chaque lancement.
 - **Zoom global de l'interface** : Ctrl + molette zoome ou dézoome toutes les fenêtres, le dock et les
   menus (50 % à 200 %, mémorisé). Réglable aussi dans Paramètres → General. Dans un terminal, Ctrl +
   molette change toujours uniquement la taille de la police.

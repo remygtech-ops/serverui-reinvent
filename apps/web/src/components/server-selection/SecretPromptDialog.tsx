@@ -6,11 +6,17 @@ import { KeyRound, X } from "lucide-react";
 import { ServerIcon } from "@/src/components/servers/ServerIcon";
 import type { Server } from "@/src/lib/servers";
 
-export type SecretInput = { password?: string; privateKey?: string; passphrase?: string };
+export type SecretInput = {
+  password?: string;
+  privateKey?: string;
+  passphrase?: string;
+  remember?: boolean;
+};
 
 /**
- * Asked when a server was saved without its password/key (Save password off).
- * The value goes straight to the connect request and is never stored by the browser.
+ * Asked when a server has no usable password/key: saved without it (Save password off), or the
+ * stored one can no longer be read. The value goes straight to the connect request and is never
+ * stored by the browser; "Remember" asks the backend to store it (encrypted) after a good login.
  */
 export function SecretPromptDialog({
   server,
@@ -27,6 +33,9 @@ export function SecretPromptDialog({
   const input = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const [value, setValue] = useState("");
   const [passphrase, setPassphrase] = useState("");
+  const lost = server.credentialsLost === true;
+  // A lost secret is repaired by default; a password left out on purpose stays out.
+  const [remember, setRemember] = useState(lost);
   const isKey = server.authType === "private_key";
 
   useEffect(() => {
@@ -38,7 +47,9 @@ export function SecretPromptDialog({
     const secret = value.trim();
     if (!secret) return;
     onSubmit(
-      isKey ? { privateKey: secret, passphrase: passphrase || undefined } : { password: secret },
+      isKey
+        ? { privateKey: secret, passphrase: passphrase || undefined, remember }
+        : { password: secret, remember },
     );
   }
 
@@ -80,7 +91,9 @@ export function SecretPromptDialog({
             <span className="font-medium">
               {server.username}@{server.address}
             </span>{" "}
-            is not saved. It is kept in memory only until ServerUI closes.
+            {lost
+              ? "was saved by an older version and cannot be read any more. Enter it once more to fix it."
+              : "is not saved. It is kept in memory only until ServerUI closes, unless you remember it."}
           </p>
           {isKey ? (
             <textarea
@@ -119,6 +132,15 @@ export function SecretPromptDialog({
               autoComplete="off"
             />
           ) : null}
+          <label className="flex cursor-pointer items-center gap-2 text-[13px]">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(event) => setRemember(event.target.checked)}
+              className="size-4"
+            />
+            Remember {isKey ? "this key" : "this password"} (stored encrypted)
+          </label>
           {error ? (
             <p className="text-[12px] text-red-500" role="alert">
               {error}

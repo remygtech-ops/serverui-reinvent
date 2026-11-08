@@ -1,6 +1,6 @@
 {
   "name": "serverui-desktop",
-  "version": "0.3.32",
+  "version": "0.3.33",
   "private": true,
   "description": "ServerUI desktop shell (Tauri)",
   "scripts": {

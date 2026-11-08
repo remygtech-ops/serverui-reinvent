@@ -302,11 +302,13 @@ func (s *Service) Connect(ctx context.Context, id string, supplied *Secret) (Pub
 	if err != nil {
 		return Public{}, err
 	}
+	var suppliedPlain string
 	if supplied != nil {
 		secret, err := s.suppliedSecret(rec.AuthType, *supplied)
 		if err != nil {
 			return s.public(rec), err
 		}
+		suppliedPlain = secret
 		s.setSessionSecret(rec.ID, secret)
 	}
 	log.Printf("SSH connection requested server=%s", rec.Name)
@@ -341,6 +343,12 @@ func (s *Service) Connect(ctx context.Context, id string, supplied *Secret) (Pub
 	rec.LastSeen = &now
 	rec.UpdatedAt = now
 	_ = s.store.Update(ctx, rec)
+	if supplied != nil && supplied.Remember {
+		// Only after a successful login, so a wrong password is never stored.
+		if err := s.rememberSecret(ctx, rec, suppliedPlain); err != nil {
+			log.Printf("server.remember_failed id=%s", rec.ID)
+		}
+	}
 	log.Printf("SSH connection established server=%s", rec.Name)
 	return s.public(rec), nil
 }
@@ -461,9 +469,10 @@ func (s *Service) savedAuth(ctx context.Context, rec Record) (sshx.AuthMethod, e
 	secret, err := s.box.Decrypt(cred.EncryptedSecret)
 	if err != nil {
 		// The encryption key changed since the secret was stored (e.g. a lost keychain entry).
-		// Ask for the password again instead of reporting a misleading authentication failure.
+		// Treat it like a server saved without credentials: use what was entered this session,
+		// or ask again instead of reporting a misleading authentication failure.
 		log.Printf("server.secret_unreadable id=%s", rec.ID)
-		return nil, ErrSecretRequired
+		secret = ""
 	}
 	if secret == "" {
 		// Saved without credentials: only a secret entered this session can be used.
@@ -484,6 +493,33 @@ func (s *Service) secretSaved(id string) bool {
 	}
 	secret, err := s.box.Decrypt(cred.EncryptedSecret)
 	return err == nil && secret != ""
+}
+
+// secretLost reports a stored secret that cannot be decrypted with the current key.
+func (s *Service) secretLost(id string) bool {
+	cred, err := s.store.GetCredential(context.Background(), id)
+	if err != nil {
+		return false
+	}
+	_, err = s.box.Decrypt(cred.EncryptedSecret)
+	return err != nil
+}
+
+// rememberSecret stores a secret the operator just entered, after it proved to work.
+func (s *Service) rememberSecret(ctx context.Context, rec Record, secret string) error {
+	encrypted, err := s.box.Encrypt(secret)
+	if err != nil {
+		return fmt.Errorf("unable to store credentials")
+	}
+	now := time.Now().UTC()
+	return s.store.UpsertCredential(ctx, Credential{
+		ID:              newID(),
+		ServerID:        rec.ID,
+		AuthType:        rec.AuthType,
+		EncryptedSecret: encrypted,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	})
 }
 
 func (s *Service) suppliedSecret(authType string, supplied Secret) (string, error) {
@@ -588,6 +624,7 @@ func (s *Service) public(rec Record) Public {
 	// Connected means a live pooled SSH session, not a previous successful test.
 	out.Connected = live
 	out.CredentialsSaved = s.secretSaved(rec.ID)
+	out.CredentialsLost = s.secretLost(rec.ID)
 	return out
 }
 

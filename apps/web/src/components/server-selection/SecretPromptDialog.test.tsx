@@ -23,7 +23,7 @@ describe("SecretPromptDialog", () => {
     expect(connect).toBeDisabled();
     await userEvent.type(screen.getByLabelText("Password"), "hunter2");
     await userEvent.click(connect);
-    expect(onSubmit).toHaveBeenCalledWith({ password: "hunter2" });
+    expect(onSubmit).toHaveBeenCalledWith({ password: "hunter2", remember: false });
   });
 
   it("asks for a key when the server uses one, and shows the last error", async () => {
@@ -40,7 +40,11 @@ describe("SecretPromptDialog", () => {
     await userEvent.type(screen.getByLabelText("Private key"), "KEY");
     await userEvent.type(screen.getByLabelText("Key passphrase"), "pw");
     await userEvent.click(screen.getByRole("button", { name: "Connect" }));
-    expect(onSubmit).toHaveBeenCalledWith({ privateKey: "KEY", passphrase: "pw" });
+    expect(onSubmit).toHaveBeenCalledWith({
+      privateKey: "KEY",
+      passphrase: "pw",
+      remember: false,
+    });
   });
 
   it("cancels with Escape", async () => {
@@ -48,5 +52,30 @@ describe("SecretPromptDialog", () => {
     render(<SecretPromptDialog server={server} onSubmit={() => undefined} onCancel={onCancel} />);
     await userEvent.type(screen.getByLabelText("Password"), "{Escape}");
     expect(onCancel).toHaveBeenCalled();
+  });
+
+  it("remembers by default when the stored password can no longer be read", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <SecretPromptDialog
+        server={{ ...server, credentialsLost: true }}
+        onSubmit={onSubmit}
+        onCancel={() => undefined}
+      />,
+    );
+    expect(screen.getByText(/saved by an older version/)).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: /Remember this password/ })).toBeChecked();
+    await userEvent.type(screen.getByLabelText("Password"), "hunter2");
+    await userEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(onSubmit).toHaveBeenCalledWith({ password: "hunter2", remember: true });
+  });
+
+  it("lets you remember a password that was left out on purpose", async () => {
+    const onSubmit = vi.fn();
+    render(<SecretPromptDialog server={server} onSubmit={onSubmit} onCancel={() => undefined} />);
+    await userEvent.click(screen.getByRole("checkbox", { name: /Remember this password/ }));
+    await userEvent.type(screen.getByLabelText("Password"), "pw");
+    await userEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(onSubmit).toHaveBeenCalledWith({ password: "pw", remember: true });
   });
 });

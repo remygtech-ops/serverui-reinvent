@@ -100,6 +100,7 @@ export function toSessionServer(info: ServerInfo): Server {
     iconId: info.iconId || "server",
     customIcon: info.customIcon === true,
     credentialsSaved: info.credentialsSaved !== false,
+    credentialsLost: info.credentialsLost === true,
     updatedAt: info.updatedAt,
     error: info.error,
     lastSeen: info.lastSeen,

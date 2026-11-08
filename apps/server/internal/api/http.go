@@ -254,6 +254,7 @@ type connectBody struct {
 	Password   string `json:"password"`
 	PrivateKey string `json:"privateKey"`
 	Passphrase string `json:"passphrase"`
+	Remember   bool   `json:"remember"`
 }
 
 func (s *Server) connectServer(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +266,7 @@ func (s *Server) connectServer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if body.Password != "" || body.PrivateKey != "" {
-			supplied = &servers.Secret{Password: body.Password, PrivateKey: body.PrivateKey, Passphrase: body.Passphrase}
+			supplied = &servers.Secret{Password: body.Password, PrivateKey: body.PrivateKey, Passphrase: body.Passphrase, Remember: body.Remember}
 		}
 	}
 	item, err := s.servers.Connect(r.Context(), r.PathValue("id"), supplied)

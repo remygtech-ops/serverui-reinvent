@@ -477,3 +477,68 @@ func TestOnlyOneFirstUseKeyIsPinnedAndTheOtherConnectionIsRefused(t *testing.T) 
 		t.Fatalf("the pinned key stays accepted: %v", err)
 	}
 }
+
+func TestUnreadableStoredSecretIsRepairedWhenRememberedAfterAConnection(t *testing.T) {
+	svc := testService(t)
+	ctx := context.Background()
+	created, err := svc.Create(ctx, Input{
+		Name: "Lab", Host: "203.0.113.30", Port: 22, Username: "me",
+		AuthType: AuthPassword, Password: "hunter2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The same database opened with another key: the stored secret can no longer be decrypted.
+	otherKey, err := crypto.RandomKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherBox, err := crypto.New(otherKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := NewService(svc.store, otherBox)
+	fresh.SetDialer(svc.dial)
+
+	if _, _, err := fresh.loadAuth(created.ID); !errors.Is(err, ErrSecretRequired) {
+		t.Fatalf("want ErrSecretRequired, got %v", err)
+	}
+	got, err := fresh.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CredentialsSaved || !got.CredentialsLost {
+		t.Fatalf("saved=%v lost=%v", got.CredentialsSaved, got.CredentialsLost)
+	}
+
+	// A password entered this session is used even though the stored one is unreadable.
+	fresh.setSessionSecret(created.ID, "hunter2")
+	if _, _, err := fresh.loadAuth(created.ID); err != nil {
+		t.Fatalf("session secret: %v", err)
+	}
+	if still, _ := fresh.Get(ctx, created.ID); !still.CredentialsLost {
+		t.Fatal("must not be stored without remember")
+	}
+
+	// Remembering stores it under the current key, and it survives a restart.
+	rec, err := fresh.store.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.rememberSecret(ctx, rec, "hunter2"); err != nil {
+		t.Fatal(err)
+	}
+	restarted := NewService(svc.store, otherBox)
+	restarted.SetDialer(svc.dial)
+	repaired, err := restarted.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repaired.CredentialsSaved || repaired.CredentialsLost {
+		t.Fatalf("saved=%v lost=%v", repaired.CredentialsSaved, repaired.CredentialsLost)
+	}
+	if _, _, err := restarted.loadAuth(created.ID); err != nil {
+		t.Fatalf("after restart: %v", err)
+	}
+}
